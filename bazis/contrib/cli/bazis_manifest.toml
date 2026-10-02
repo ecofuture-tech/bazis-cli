@@ -1,0 +1,32 @@
+# What the package is for and how to use it, for tools and AI agents (see AGENTS.md).
+# `import` paths and `check` ids are verified by tests/test_cli.py.
+
+[package]
+name = "bazis-cli"
+summary = "the bazis command: creates, extends and audits Bazis projects with Claude"
+solves = [
+    "create a Bazis project from a description of what it does",
+    "add a Bazis package to a project and set it up",
+    "review a project against the guides and checks of its Bazis packages",
+]
+requires = ["bazis-mcp"]
+pairs_well = []
+
+[[extension_points]]
+name = "bazis"
+import = "bazis.contrib.cli.main.main"
+use_when = "the command line entry point"
+
+[[extension_points]]
+name = "Task"
+import = "bazis.contrib.cli.agent.Task"
+use_when = "run the agent of a command from Python (bazis.contrib.cli.agent.run)"
+
+[[pitfalls]]
+text = "the agent spends API credits of the account of Claude Code; limit a run with --budget"
+
+[[pitfalls]]
+text = "the system checks run the project code with its .venv, also in a read-only audit: use bazis in trusted projects"
+
+[[pitfalls]]
+text = "the tests of a new project need PostgreSQL with PostGIS and Redis (.env); without them the agent only checks and migrates"
