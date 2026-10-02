@@ -1,0 +1,18 @@
+name: Update Licenses
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '**.py'
+      - 'pyproject.toml'
+
+permissions:
+  contents: write
+
+jobs:
+  update-licenses:
+    uses: ecofuture-tech/.github/.github/workflows/reusable-update-licenses.yml@main
+    secrets:
+      WORKFLOW_LICENSE_TOKEN: ${{ secrets.WORKFLOW_LICENSE_TOKEN }}

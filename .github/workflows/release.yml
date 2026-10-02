@@ -1,0 +1,77 @@
+name: Release
+
+# Creates the release tag vX.Y.Z on the current main commit and starts Build and Publish
+# for it. Run it from the Actions tab (or through the GitHub API) on the main branch.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version without the "v" prefix, e.g. 2.3.0 or 2.4.0-rc1'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.ref == 'refs/heads/main'
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate the version
+        run: |
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)[0-9]+)?$ ]]; then
+            echo "::error::Invalid version '$VERSION', expected e.g. 2.3.0 or 2.4.0-rc1"
+            exit 1
+          fi
+          if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
+            echo "::error::Tag v$VERSION already exists"
+            exit 1
+          fi
+          # versionsort.suffix: a pre-release (v2.4.0-rc1) sorts before its release (v2.4.0)
+          LAST_TAG=$(git -c versionsort.suffix=- tag --list 'v*' --sort=-v:refname | head -n 1)
+          echo "Last release: ${LAST_TAG:-none}, new release: v$VERSION"
+          # sort -V orders "~" before anything, as versionsort.suffix does with "-"
+          NEWEST=$(printf '%s\n%s\n' "${LAST_TAG#v}" "$VERSION" | sed 's/-/~/' | sort -V | tail -n 1)
+          if [ -n "$LAST_TAG" ] && [ "$NEWEST" != "${VERSION/-/\~}" ]; then
+            echo "::error::Version $VERSION is not newer than $LAST_TAG"
+            exit 1
+          fi
+
+      - name: Require green tests on this commit
+        run: |
+          CONCLUSION=$(gh run list --workflow tests.yml --commit "$GITHUB_SHA" --status completed \
+            --json conclusion --jq 'map(.conclusion) | first // "none"')
+          echo "Tests on $GITHUB_SHA: $CONCLUSION"
+          if [ "$CONCLUSION" != "success" ]; then
+            echo "::error::The Tests workflow has not succeeded on $GITHUB_SHA ($CONCLUSION)"
+            exit 1
+          fi
+
+      - name: Create the tag
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git tag -a "v$VERSION" -m "${{ github.event.repository.name }} $VERSION" "$GITHUB_SHA"
+          git push origin "v$VERSION"
+
+      - name: Start Build and Publish
+        run: gh workflow run build-publish.yml --ref "v$VERSION"
+
+      - name: Summary
+        run: |
+          echo "Tagged \`v$VERSION\` at \`$GITHUB_SHA\` and started Build and Publish." >> "$GITHUB_STEP_SUMMARY"

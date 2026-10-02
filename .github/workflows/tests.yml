@@ -1,0 +1,60 @@
+name: Tests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uvx ruff check bazis tests
+
+  tests:
+    name: tests (python ${{ matrix.python }}, ${{ matrix.resolution }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.12', '3.13', '3.14']
+        resolution: [highest]
+        include:
+          # the lowest versions allowed by pyproject.toml
+          - python: '3.12'
+            resolution: lowest-direct
+
+    # the tests build a project and check it without PostgreSQL or Redis: no services
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install GDAL (required by the PostGIS database backend)
+        # a stalled Ubuntu mirror must fail the step quickly instead of hanging the job
+        timeout-minutes: 10
+        run: |
+          APT="sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
+          $APT update
+          $APT install -y --no-install-recommends gdal-bin
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python }}
+          activate-environment: true
+
+      - name: Install dependencies
+        run: uv pip install --resolution ${{ matrix.resolution }} -e '.[test]'
+
+      - name: Run tests
+        run: python -m pytest tests -p no:cacheprovider
