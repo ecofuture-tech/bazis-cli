@@ -20,6 +20,7 @@ directory, with the MCP server bazis-mcp of the project and the rules of Bazis.
 import json
 import re
 import sys
+import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TextIO
@@ -36,6 +37,7 @@ from claude_agent_sdk import (
     ToolUseBlock,
     query,
 )
+from claude_agent_sdk.types import CanUseToolShadowedWarning
 
 
 DEFAULT_MODEL = 'claude-opus-5-5'
@@ -243,6 +245,8 @@ async def run(task: Task, out: TextIO | None = None) -> ResultMessage | None:
     Runs the task and prints the progress; returns the final result of the agent.
     """
     result = None
+    # the read-only MCP tools of bazis-mcp are allowed in advance on purpose
+    warnings.filterwarnings('ignore', category=CanUseToolShadowedWarning)
     try:
         async for message in query(prompt=task.prompt, options=options(task)):
             result = render(message, out) or result
