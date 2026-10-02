@@ -250,6 +250,7 @@ def create_venv(directory: Path, run=subprocess.run) -> Path:
     Creates `.venv` with the dependencies of the project (with uv if it is installed) and
     returns its Python.
     """
+    directory = directory.resolve()  # the commands run in it
     venv = directory / '.venv'
     python = venv / ('Scripts/python.exe' if sys.platform == 'win32' else 'bin/python')
     uv = shutil.which('uv')

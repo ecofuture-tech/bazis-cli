@@ -17,6 +17,7 @@ import json
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 from claude_agent_sdk import (
@@ -108,13 +109,16 @@ def test_scaffold_refuses_a_directory_with_files(tmp_path):
 
 def test_create_venv_with_pip(tmp_path, monkeypatch):
     monkeypatch.setattr(scaffold.shutil, 'which', lambda name: None)
+    monkeypatch.chdir(tmp_path.parent)
     commands = []
 
     def run(command, **kwargs):
         commands.append(command)
+        assert kwargs['cwd'] == tmp_path
         return subprocess.CompletedProcess(command, 0, '', '')
 
-    python = scaffold.create_venv(tmp_path, run=run)
+    # a relative directory: the commands run in it, so their paths are absolute
+    python = scaffold.create_venv(Path(tmp_path.name), run=run)
 
     assert commands[0] == [sys.executable, '-m', 'venv', str(tmp_path / '.venv')]
     assert commands[1][:3] == [str(python), '-m', 'pip']
