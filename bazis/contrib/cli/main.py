@@ -32,12 +32,18 @@ from . import __version__, agent, scaffold
 
 def new_task(args) -> agent.Task:
     directory = args.directory.resolve()
-    name = scaffold.package_name(directory)
+    name = args.name or scaffold.package_name(directory)
     scaffold.write_files(directory, name)
     print(f'Created the project {name} in {directory}')
     if not args.no_venv:
         print('Installing the dependencies into .venv ...')
-        scaffold.create_venv(directory)
+        try:
+            scaffold.create_venv(directory)
+        except scaffold.ScaffoldError as err:
+            raise scaffold.ScaffoldError(
+                f'{err}\nThe files of the project are written: create .venv and install '
+                f'requirements-dev.txt by hand, or delete {directory} and run bazis new again.'
+            ) from err
     prompt = f"""\
 Build this Bazis project: {args.description}
 
@@ -105,7 +111,8 @@ def parser() -> argparse.ArgumentParser:
     common.add_argument('--budget', type=float, help='Stop after spending this many USD.')
     common.add_argument(
         '--yes', '-y', action='store_true',
-        help='Run shell commands without asking (file edits in the project are always allowed).',
+        help='Allow shell commands and the other tools without asking (edits of the files of '
+        'the project are always allowed; git cannot commit, push or reset).',
     )
 
     project = argparse.ArgumentParser(add_help=False)
@@ -123,6 +130,7 @@ def parser() -> argparse.ArgumentParser:
     new = commands.add_parser('new', parents=[common], help='Create and build a project.')
     new.add_argument('directory', type=Path, help='A new or empty directory.')
     new.add_argument('description', help='What the project does, in your words.')
+    new.add_argument('--name', help='The project package (default: from the directory name).')
     new.add_argument('--no-venv', action='store_true', help='Do not create .venv.')
     new.set_defaults(make_task=new_task)
 

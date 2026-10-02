@@ -48,10 +48,18 @@ directory), `--model` (default `claude-opus-5-5`), `--effort` (`low` ... `max`, 
 
 ## Permissions
 
-The agent edits the files of the project without asking. Every shell command (installing
-packages, migrations, tests) is shown and asked in the terminal: `y` allows it, `a` allows
-the rest of the run. `--yes` allows all commands; without a terminal and without `--yes`
-commands are denied. The agent never commits: review the changes and commit them yourself.
+- The agent edits the files of the project directory without asking.
+- Everything else is shown in full and asked in the terminal: every shell command
+  (installing packages, migrations, tests), edits and reads outside the project, web access.
+  `y` allows it, `a` allows the rest of the run. `--yes` allows all of it; without a
+  terminal and without `--yes` it is denied.
+- The agent cannot read `.env` and cannot commit, push or reset with git: review the changes
+  and commit them yourself.
+- Only the settings of bazis-cli apply: the Claude Code settings, hooks and MCP servers of
+  the project and of the user are not loaded.
+- `bazis audit` without `--fix` can only read the project and call bazis-mcp. bazis-mcp
+  runs the system checks of the project, that is the project code with its `.venv`: run
+  the commands only in projects you trust.
 
 The tests of a project need PostgreSQL with PostGIS and Redis (settings in `.env`); without
 them the agent creates the migrations and runs the system checks, and says that the tests

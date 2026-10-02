@@ -17,7 +17,9 @@ The skeleton of a new Bazis project: the files every project has, written withou
 model, and its virtual environment. The agent then adds the apps the project needs.
 """
 
+import importlib.util
 import json
+import keyword
 import re
 import secrets
 import shutil
@@ -154,11 +156,9 @@ def app():
     return app
 '''
 
-MCP_JSON = {
-    'mcpServers': {
-        'bazis': {'command': '.venv/bin/bazis-mcp', 'args': []},
-    }
-}
+WINDOWS = sys.platform == 'win32'
+VENV_BIN = '.venv/Scripts' if WINDOWS else '.venv/bin'
+EXE = '.exe' if WINDOWS else ''
 
 AGENTS_MD = '''# {name}
 
@@ -166,13 +166,12 @@ A [Bazis](https://github.com/ecofuture-tech/bazis) project: JSON:API services on
 FastAPI and Pydantic.
 
 - The Python environment is `.venv`; the dependencies are in `requirements.txt` and
-  `requirements-dev.txt` (install them with `.venv/bin/pip install -r ...`).
+  `requirements-dev.txt` (install them with `.venv/bin/python -m pip install -r ...`).
 - Settings are `BS_*` variables: shared ones in `project.env`, local ones and secrets in
   `.env` (not committed). Apps, including Bazis packages, are listed in `BS_INSTALLED_APPS`.
 - The MCP server `bazis` (`.mcp.json`) gives the catalog and the guides of the Bazis
   packages and the facts and checks of this project. Read the guide of a package before
-  using it, and run `.venv/bin/python manage.py bazis_doctor` and the tests after every
-  change.
+  using it, and run `python manage.py bazis_doctor` and the tests after every change.
 - PostgreSQL with PostGIS and Redis are required to run the project and the tests
   (`.env`); the checks and `makemigrations` work without them.
 '''
@@ -184,12 +183,24 @@ class ScaffoldError(Exception):
 
 def package_name(directory: Path) -> str:
     """
-    The name of the project package: the directory name as a Python identifier.
+    The name of the project package: the directory name as a Python identifier that does
+    not hide a module (`django`, `json`) or the tests.
     """
     name = re.sub(r'\W+', '_', directory.name.lower()).strip('_')
     if not name or name[0].isdigit():
         name = f'project_{name}'.rstrip('_')
+    if not valid_package_name(name):
+        name = f'{name}_project'
     return name
+
+
+def valid_package_name(name: str) -> bool:
+    return (
+        name.isidentifier()
+        and not keyword.iskeyword(name)
+        and name not in ('tests', 'test')
+        and importlib.util.find_spec(name) is None
+    )
 
 
 def write_files(directory: Path, name: str) -> list[Path]:
@@ -198,6 +209,11 @@ def write_files(directory: Path, name: str) -> list[Path]:
     """
     if directory.exists() and any(directory.iterdir()):
         raise ScaffoldError(f'{directory} is not empty')
+    if not valid_package_name(name):
+        raise ScaffoldError(
+            f'{name!r} cannot be the project package: it must be an identifier that is not '
+            'a keyword, "tests" or the name of an installed module'
+        )
     files = {
         'manage.py': MANAGE_PY.format(name=name),
         f'{name}/__init__.py': '',
@@ -214,7 +230,10 @@ def write_files(directory: Path, name: str) -> list[Path]:
         'pytest.ini': PYTEST_INI.format(name=name),
         'tests/__init__.py': '',
         'tests/conftest.py': CONFTEST_PY.format(name=name),
-        '.mcp.json': json.dumps(MCP_JSON, indent=2) + '\n',
+        '.mcp.json': json.dumps(
+            {'mcpServers': {'bazis': {'command': f'{VENV_BIN}/bazis-mcp{EXE}', 'args': []}}},
+            indent=2,
+        ) + '\n',
         'AGENTS.md': AGENTS_MD.format(name=name),
     }
     written = []
@@ -236,7 +255,8 @@ def create_venv(directory: Path, run=subprocess.run) -> Path:
     uv = shutil.which('uv')
     if uv:
         commands = [
-            [uv, 'venv', '--quiet', '--python', sys.executable, str(venv)],
+            # --seed installs pip, which the agent uses to add packages
+            [uv, 'venv', '--quiet', '--seed', '--python', sys.executable, str(venv)],
             [uv, 'pip', 'install', '--quiet', '--python', str(python),
              '-r', str(directory / 'requirements-dev.txt')],
         ]

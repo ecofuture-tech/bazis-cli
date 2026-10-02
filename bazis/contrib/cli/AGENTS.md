@@ -22,8 +22,12 @@ without asking).
 
 ## Rules
 
-- File edits in the project are accepted; every shell command is asked in the terminal
-  (`a` allows the rest of the run) unless `--yes`. Without a terminal and `--yes` commands
-  are denied.
-- The agent never commits: the user reviews and commits the changes.
+- Edits of the files of the project are accepted; every shell command and every other tool
+  call (edits or reads outside the project, web) is asked in the terminal (`a` allows the
+  rest of the run) unless `--yes`; without a terminal and `--yes` they are denied.
+- `.env` cannot be read; git cannot commit, push, reset or rebase: the user reviews and
+  commits the changes.
+- Only the MCP server bazis-mcp and no Claude Code settings of the project or the user are
+  loaded. The checks of bazis-mcp run the project code: use the commands in trusted
+  projects.
 - Credentials are those of Claude Code: `claude login` or `ANTHROPIC_API_KEY`.

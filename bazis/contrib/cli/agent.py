@@ -17,6 +17,8 @@ The agent that does the work of a command: Claude Code (Claude Agent SDK) in the
 directory, with the MCP server bazis-mcp of the project and the rules of Bazis.
 """
 
+import json
+import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -25,6 +27,7 @@ from typing import TextIO
 from claude_agent_sdk import (
     AssistantMessage,
     ClaudeAgentOptions,
+    HookMatcher,
     PermissionResultAllow,
     PermissionResultDeny,
     ResultError,
@@ -38,10 +41,11 @@ from claude_agent_sdk import (
 DEFAULT_MODEL = 'claude-opus-5-5'
 DEFAULT_EFFORT = 'high'
 
-#: tools that only read: the MCP server and the files of the project
-READ_ONLY_TOOLS = ['Read', 'Grep', 'Glob', 'mcp__bazis']
-#: tools that change the project without a shell; edits are accepted in the project directory
-WRITE_TOOLS = ['Write', 'Edit', 'MultiEdit']
+#: git commands that change the repository: the user commits, never the agent
+GIT_DENY = ['Bash(git commit:*)', 'Bash(git push:*)', 'Bash(git reset:*)', 'Bash(git rebase:*)']
+#: tools a review cannot use
+WRITE_TOOLS = ['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Bash', 'WebFetch', 'WebSearch']
+GIT_COMMAND_RE = re.compile(r'(^|[;&|(]\s*)git\s+(commit|push|reset|rebase)\b', re.MULTILINE)
 
 RULES = """\
 # Bazis
@@ -55,9 +59,11 @@ separate package `bazis-<name>`. A project installs only the packages it needs.
   package, also `bazis` for the core), `project_info` (the installed packages, settings,
   models and routes of this project) and `run_doctor` (the system checks). Read the guide
   of every package before you use it and follow it exactly.
-- The Python environment is `.venv`: run `.venv/bin/python` and `.venv/bin/pip`. Add a
-  package to `requirements.txt`, install it with `.venv/bin/pip install -r requirements.txt`
-  and list its app in `BS_INSTALLED_APPS` of `project.env` when its guide says so.
+- Read `AGENTS.md` (and `CLAUDE.md` if there is one) of the project first.
+- The Python environment is `.venv` (`.venv/bin/python`, on Windows
+  `.venv\\Scripts\\python.exe`). Add a package to `requirements.txt`, install it with
+  `.venv/bin/python -m pip install -r requirements.txt` and list its app in
+  `BS_INSTALLED_APPS` of `project.env` when its guide says so.
 - After changing models run `.venv/bin/python manage.py makemigrations`. After every change
   run `run_doctor` and fix the errors and the warnings of the packages you used. Run the
   tests with `.venv/bin/python -m pytest` when PostgreSQL and Redis are available (`.env`);
@@ -100,74 +106,117 @@ def mcp_server(project_dir: Path) -> dict:
     }
 
 
-def options(task: Task, ask=None) -> ClaudeAgentOptions:
+def _path_rule(tool: str, path: Path) -> str:
     """
-    The options of the agent for a task. A read-only task cannot change files or run
-    commands; otherwise file edits in the project are accepted and every shell command goes
-    through `ask` (unless `yes`).
+    A permission rule for an absolute path (`//` starts an absolute path in the rules).
+    """
+    return f'{tool}(//{path.resolve().as_posix().lstrip("/")})'
+
+
+def options(task: Task, asker: 'Asker | None' = None) -> ClaudeAgentOptions:
+    """
+    The options of the agent for a task. Only the MCP server bazis-mcp of the CLI is used
+    (`strict_mcp_config`) and no settings of the project or the user are loaded, so the
+    permissions below are the only ones.
+
+    A read-only task can only read the project and call the MCP tools. A task that writes
+    gets the edits of files in the project accepted (`acceptEdits`); everything else is
+    asked: shell commands through a PreToolUse hook (the CLI would otherwise allow commands
+    such as `rm` or `sed` in `acceptEdits` mode), the other tools through `can_use_tool`.
+    In both, `.env` cannot be read and git cannot change the repository.
     """
     rules = '\n'.join([RULES, *task.extra_rules])
+    secrets = [_path_rule(tool, task.project_dir / '.env') for tool in ('Read', 'Edit')]
     common = dict(
         cwd=str(task.project_dir),
         model=task.model,
         effort=task.effort,
         max_budget_usd=task.max_budget_usd,
         mcp_servers={'bazis': mcp_server(task.project_dir)},
+        strict_mcp_config=True,
+        setting_sources=[],
         system_prompt={'type': 'preset', 'preset': 'claude_code', 'append': rules},
-        setting_sources=['project'],
+        allowed_tools=['mcp__bazis'],
     )
     if not task.writes:
         return ClaudeAgentOptions(
-            allowed_tools=READ_ONLY_TOOLS,
-            disallowed_tools=[*WRITE_TOOLS, 'Bash', 'NotebookEdit'],
+            disallowed_tools=[*WRITE_TOOLS, *secrets],
             permission_mode='dontAsk',
             **common,
         )
+    asker = asker or Asker(task.yes)
     return ClaudeAgentOptions(
-        allowed_tools=[*READ_ONLY_TOOLS, *WRITE_TOOLS],
+        disallowed_tools=[*GIT_DENY, *secrets],
         permission_mode='acceptEdits',
-        can_use_tool=ask or ask_in_terminal(task.yes),
+        can_use_tool=asker.can_use_tool,
+        hooks={'PreToolUse': [HookMatcher(matcher='Bash', hooks=[asker.bash_hook])]},
         **common,
     )
 
 
-def ask_in_terminal(yes: bool, stdin: TextIO | None = None, out: TextIO | None = None):
+class Asker:
     """
-    The permission callback for the tools that are not allowed in advance (shell commands,
-    web access): allowed with `yes`, else asked in the terminal (`a` allows the rest of the
-    run). Without a terminal they are denied.
+    Asks the user in the terminal before the tools that are not allowed in advance: `y`
+    allows the call, `a` allows the rest of the run. With `yes` everything is allowed;
+    without a terminal everything is denied. Commands that change the git repository are
+    always denied.
     """
-    allow_all = yes
-    stdin = stdin or sys.stdin
-    out = out or sys.stderr
 
-    async def ask(tool_name: str, tool_input: dict, context) -> object:
-        nonlocal allow_all
-        if allow_all:
-            return PermissionResultAllow()
-        if not stdin.isatty():
-            return PermissionResultDeny(
-                message='Not allowed: no terminal to ask the user (run with --yes to allow).'
-            )
-        out.write(f'\n? {tool_name}: {describe(tool_name, tool_input)}\n  allow [y/N/a=all]: ')
-        out.flush()
-        answer = stdin.readline().strip().lower()
+    def __init__(self, yes: bool, stdin: TextIO | None = None, out: TextIO | None = None):
+        self.allow_all = yes
+        self.stdin = stdin or sys.stdin
+        self.out = out or sys.stderr
+
+    def decide(self, tool_name: str, tool_input: dict) -> str | None:
+        """
+        None if allowed, else the reason of the denial.
+        """
+        command = tool_input.get('command', '') if tool_name == 'Bash' else ''
+        if GIT_COMMAND_RE.search(command):
+            return 'The user commits the changes: git commands that change the repository are not allowed.'
+        if self.allow_all:
+            return None
+        if not self.stdin.isatty():
+            return 'Not allowed: no terminal to ask the user (run bazis with --yes to allow).'
+        details = command or json.dumps(tool_input, ensure_ascii=False, indent=2)
+        why = tool_input.get('description')
+        self.out.write(f'\n? {tool_name}' + (f' — {why}' if why else '') + '\n')
+        self.out.write(''.join(f'    {line}\n' for line in details.splitlines()))
+        self.out.write('  allow [y/N/a=all]: ')
+        self.out.flush()
+        answer = self.stdin.readline().strip().lower()
         if answer == 'a':
-            allow_all = True
+            self.allow_all = True
         if answer in ('y', 'yes', 'a'):
-            return PermissionResultAllow()
-        return PermissionResultDeny(message='The user did not allow it.')
+            return None
+        return 'The user did not allow it.'
 
-    return ask
+    async def can_use_tool(self, tool_name: str, tool_input: dict, context) -> object:
+        reason = self.decide(tool_name, tool_input)
+        if reason is None:
+            return PermissionResultAllow()
+        return PermissionResultDeny(message=reason)
+
+    async def bash_hook(self, hook_input: dict, tool_use_id, context) -> dict:
+        reason = self.decide('Bash', hook_input.get('tool_input', {}))
+        return {
+            'hookSpecificOutput': {
+                'hookEventName': 'PreToolUse',
+                'permissionDecision': 'allow' if reason is None else 'deny',
+                'permissionDecisionReason': reason or 'Allowed by the user.',
+            }
+        }
 
 
 def describe(tool_name: str, tool_input: dict) -> str:
     """
-    One line about a tool call.
+    One line about a tool call, for the progress output.
     """
     for key in ('command', 'file_path', 'path', 'pattern', 'url', 'name'):
         if value := tool_input.get(key):
-            return str(value).splitlines()[0][:200]
+            lines = str(value).splitlines()
+            more = ' ...' if len(lines) > 1 else ''
+            return lines[0][:200] + more
     return ''
 
 
