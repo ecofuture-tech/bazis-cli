@@ -42,3 +42,4 @@ my-*
 My*
 */**/_version.py
 /uv.lock
+eval-results/

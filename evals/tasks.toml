@@ -1,0 +1,51 @@
+# The tasks of the evals: `bazis new` builds a project from the description, the grader
+# checks the result (see grade.py). `expected_packages` are the Bazis packages a correct
+# project needs; the minimums keep the grader independent of the names the agent chooses.
+
+[[task]]
+id = "tracker"
+description = """A task tracker: projects with a name and a description, tasks in a project \
+with a title, a due date and a done flag. The API lists the tasks of a project and filters \
+them by done."""
+expected_packages = []
+min_models = 2
+min_routes = 2
+min_tests = 3
+
+[[task]]
+id = "library"
+description = """A library: books with authors, readers borrow books (loans with the date \
+of return). Readers are users; a reader sees and changes only his own loans, librarians \
+(staff) see and manage all of them."""
+expected_packages = ["bazis-users", "bazis-permit"]
+min_models = 3
+min_routes = 3
+min_tests = 4
+
+[[task]]
+id = "orders"
+description = """An online shop: products with prices, orders of users with items. An order \
+goes through the statuses new -> paid -> shipped; only staff can mark an order shipped. \
+Users see only their own orders."""
+expected_packages = ["bazis-users", "bazis-permit", "bazis-statusy"]
+min_models = 3
+min_routes = 2
+min_tests = 4
+
+[[task]]
+id = "documents"
+description = """A document archive: documents with a title and attached files. Only signed-in \
+users can upload files and create documents; every document records who created it."""
+expected_packages = ["bazis-users", "bazis-uploadable", "bazis-author"]
+min_models = 1
+min_routes = 2
+min_tests = 3
+
+[[task]]
+id = "catalog"
+description = """A product catalog with categories and products. Clients must be able to \
+create a category with dozens of products in one request that succeeds or fails as a whole."""
+expected_packages = ["bazis-bulk"]
+min_models = 2
+min_routes = 2
+min_tests = 3
