@@ -20,7 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
-      - run: uvx ruff check bazis tests
+      - run: uvx ruff check bazis tests evals
 
   tests:
     name: tests (python ${{ matrix.python }}, ${{ matrix.resolution }})

@@ -30,6 +30,21 @@ from claude_agent_sdk import ClaudeSDKError, CLIConnectionError
 from . import __version__, agent, scaffold
 
 
+def new_prompt(description: str, name: str) -> str:
+    """
+    The task of the agent of `bazis new` (also used by the evals).
+    """
+    return f"""\
+Build this Bazis project: {description}
+
+The skeleton is ready: the project package `{name}` (settings, root router, ASGI app in
+`{name}/main.py`), `project.env`, `.env`, `requirements.txt`, `tests/`, and `.venv` with
+Bazis installed. Read the guide of the core (`package_guide("bazis")`), choose the Bazis
+packages the project needs with `list_packages`, read their guides, then create the apps
+with their models, routes and tests, and register the routers in `{name}/router.py`.
+"""
+
+
 def new_task(args) -> agent.Task:
     directory = args.directory.resolve()
     name = args.name or scaffold.package_name(directory)
@@ -44,15 +59,7 @@ def new_task(args) -> agent.Task:
                 f'{err}\nThe files of the project are written: create .venv and install '
                 f'requirements-dev.txt by hand, or delete {directory} and run bazis new again.'
             ) from err
-    prompt = f"""\
-Build this Bazis project: {args.description}
-
-The skeleton is ready: the project package `{name}` (settings, root router, ASGI app in
-`{name}/main.py`), `project.env`, `.env`, `requirements.txt`, `tests/`, and `.venv` with
-Bazis installed. Read the guide of the core (`package_guide("bazis")`), choose the Bazis
-packages the project needs with `list_packages`, read their guides, then create the apps
-with their models, routes and tests, and register the routers in `{name}/router.py`.
-"""
+    prompt = new_prompt(args.description, name)
     return _task(args, prompt, directory)
 
 
