@@ -21,6 +21,8 @@ and tests that pass. A product with a frontend (`frontend = true`) also needs sp
 against a fresh contract, generated files that are not stale, a frontend that builds and
 passes its lint and component tests, and end-to-end tests of its scenarios that pass
 against the backend with the test data of `manage.py e2e_data` (Node.js is needed).
+The grader runs on POSIX only (macOS, Linux): it stops the servers and the commands it
+starts by their process group.
 """
 
 import json
