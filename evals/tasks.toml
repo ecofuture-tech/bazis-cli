@@ -1,6 +1,9 @@
 # The tasks of the evals: `bazis new` builds a project from the description, the grader
 # checks the result (see grade.py). `expected_packages` are the Bazis packages a correct
 # project needs; the minimums keep the grader independent of the names the agent chooses.
+# `frontend = true` builds the whole product with its frontend (bazis-front, Node.js) and
+# grades it too, with at least `min_scenarios` end-to-end scenarios; the other tasks are
+# built with `--no-frontend`.
 
 [[task]]
 id = "tracker"
@@ -49,3 +52,16 @@ expected_packages = ["bazis-bulk"]
 min_models = 2
 min_routes = 2
 min_tests = 3
+
+[[task]]
+id = "helpdesk"
+frontend = true
+description = """A help desk: customers sign in and open tickets with a subject and a \
+description, and see only their own tickets; agents see all the tickets and take them. A \
+ticket goes through the statuses open -> in_progress -> resolved; only agents move a \
+ticket, and a customer can no longer change a ticket once it is in progress."""
+expected_packages = ["bazis-users", "bazis-permit", "bazis-statusy"]
+min_models = 1
+min_routes = 1
+min_tests = 3
+min_scenarios = 3

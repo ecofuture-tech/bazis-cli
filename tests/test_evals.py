@@ -12,6 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import json
+import subprocess
+
+from bazis.contrib.cli import scaffold
 from bazis.contrib.mcp import catalog
 
 from evals import grade, run
@@ -26,6 +30,8 @@ def test_tasks_are_valid():
         assert task['description'].strip()
         assert set(task['expected_packages']) <= known, task['id']
         assert task['min_models'] >= 1 and task['min_routes'] >= 1 and task['min_tests'] >= 1
+        assert task.get('min_scenarios', 1) >= 1
+    assert any(t.get('frontend') for t in tasks)
 
 
 def test_json_in_output_with_other_lines():
@@ -63,3 +69,70 @@ def test_running_needs_a_budget():
 
     with pytest.raises(SystemExit, match='budget'):
         run.main_cli(['--task', 'tracker'])
+
+
+def done(returncode: int = 0, stdout: str = '') -> subprocess.CompletedProcess:
+    return subprocess.CompletedProcess([], returncode, stdout, '')
+
+
+def product(tmp_path, scenarios: int):
+    scaffold.write_files(tmp_path, 'desk', frontend=True)
+    generated = tmp_path / 'frontend' / 'e2e' / 'generated'
+    generated.mkdir(parents=True)
+    (tmp_path / 'frontend' / 'bazis-front.lock.json').write_text('{}')
+    for index in range(scenarios):
+        (generated / f'scenario-{index}.spec.ts').write_text('')
+    (generated / 'product.ts').write_text('')
+    return tmp_path
+
+
+def test_frontend_checks(tmp_path, monkeypatch):
+    issues = [{'code': 'P019', 'file': 'spec/product.yaml', 'path': '/roles/0', 'severity': 'error'},
+              {'code': 'P020', 'file': 'spec/product.yaml', 'path': '/x', 'severity': 'warning'}]
+    commands = []
+
+    def fake_run(project, args, env):
+        commands.append(args)
+        if args[2] == 'check':
+            return done(1, json.dumps({'contract': True, 'errors': 1, 'warnings': 1, 'issues': issues}))
+        return done(1 if args[2] == 'e2e' else 0)
+
+    monkeypatch.setattr(grade, 'run', fake_run)
+    monkeypatch.setattr(grade, 'npm', lambda frontend, args, env: done(int(args == ['test'])))
+
+    checks = {c.name: c for c in grade.frontend_checks(product(tmp_path, 2), {}, 3)}
+
+    assert checks['frontend created'].passed
+    assert not checks['specs valid against the contract'].passed
+    assert checks['specs valid against the contract'].detail == 'P019 spec/product.yaml#/roles/0'
+    assert not checks['at least 3 scenarios'].passed
+    assert checks['at least 3 scenarios'].detail == 'scenario-0.spec, scenario-1.spec'
+    assert not checks['theme and end-to-end tests generated'].passed
+    assert checks['frontend builds'].passed
+    assert not checks['frontend lint and component tests pass'].passed
+    assert ['manage.py', 'bazis_front', 'design', '--check'] in commands
+
+
+def test_frontend_checks_without_a_frontend(tmp_path):
+    checks = grade.frontend_checks(tmp_path, {}, 1)
+    assert [(c.name, c.passed) for c in checks] == [('frontend created', False)]
+    assert grade.frontend_database_checks(tmp_path, {}, True) == []
+
+
+def test_frontend_database_checks_without_a_database(tmp_path):
+    checks = grade.frontend_database_checks(product(tmp_path, 1), {}, False, 'no PostgreSQL')
+    assert [(c.name, c.passed, c.detail) for c in checks] == [
+        ('contract fresh', False, 'no PostgreSQL'),
+        ('end-to-end tests pass', False, 'no PostgreSQL'),
+    ]
+
+
+def test_end_to_end_needs_the_test_data(tmp_path, monkeypatch):
+    monkeypatch.setattr(grade, 'run', lambda project, args, env: done(1, 'Unknown command: e2e_data'))
+    check = grade.end_to_end(product(tmp_path, 1), {})
+    assert not check.passed and check.detail.startswith('manage.py e2e_data: ')
+
+
+def test_project_package(tmp_path):
+    scaffold.write_files(tmp_path / 'x', 'desk')
+    assert grade.project_package(tmp_path / 'x') == 'desk'

@@ -3,14 +3,14 @@
 
 [package]
 name = "bazis-cli"
-summary = "the bazis command: creates, extends and audits Bazis projects with Claude"
+summary = "the bazis command: creates, extends and audits Bazis products (backend and frontend) with Claude"
 solves = [
-    "create a Bazis project from a description of what it does",
-    "add a Bazis package to a project and set it up",
-    "review a project against the guides and checks of its Bazis packages",
+    "create a Bazis product from a description of what it does: the backend, and its frontend made by bazis-front (specs, contract, screens, design, end-to-end tests)",
+    "add a Bazis package to a project and set it up, in the backend and the frontend",
+    "review a project against the guides and checks of its Bazis packages and of its frontend",
 ]
 requires = ["bazis-mcp"]
-pairs_well = []
+pairs_well = ["bazis-front"]
 
 [[extension_points]]
 name = "bazis"
@@ -30,3 +30,12 @@ text = "the system checks run the project code with its .venv, also in a read-on
 
 [[pitfalls]]
 text = "the tests of a new project need PostgreSQL with PostGIS and Redis (.env); without them the agent only checks and migrates"
+
+[[pitfalls]]
+text = "bazis new builds the frontend by default and then needs Node.js with npm; --no-frontend builds only the backend, and bazis add bazis-front adds the frontend later"
+
+[[pitfalls]]
+text = "the contract and the end-to-end tests of the frontend need a migrated PostgreSQL database; the test data of the end-to-end tests is the management command e2e_data of the project (E2E_PASSWORD)"
+
+[[pitfalls]]
+text = "BAZIS_FRONT_REQUIREMENT replaces the requirement of bazis-front in requirements.txt of a new product (a path to a wheel or a checkout, or a URL) to try a bazis-front that is not on PyPI"

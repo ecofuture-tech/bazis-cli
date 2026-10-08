@@ -30,6 +30,7 @@ from claude_agent_sdk import (
 )
 
 from bazis.contrib.cli import agent, main, scaffold
+from bazis.contrib.cli.scaffold import node_problem
 from bazis.core.introspect import validate_manifest
 
 
@@ -82,6 +83,31 @@ def test_scaffold_refuses_a_bad_package_name(tmp_path):
         scaffold.write_files(tmp_path / 'x', 'json')
 
 
+@pytest.fixture(autouse=True)
+def node(monkeypatch):
+    """
+    Node.js is found unless a test says otherwise.
+    """
+    monkeypatch.setattr(scaffold, 'node_problem', lambda: None)
+
+
+def doctor(directory: Path) -> list:
+    """
+    The messages of `bazis_doctor` of a project: its own settings only, but the libraries
+    of this machine (GDAL, GEOS).
+    """
+    env = {
+        k: v for k, v in os.environ.items()
+        if not k.startswith(('BS_', 'DJANGO_')) or k.endswith('_LIBRARY_PATH')
+    }
+    done = subprocess.run(
+        [sys.executable, 'manage.py', 'bazis_doctor', '--json'],
+        cwd=directory, env=env, capture_output=True, text=True, timeout=300,
+    )
+    assert done.returncode == 0, done.stderr[-3000:]
+    return json.loads(done.stdout)
+
+
 def test_scaffold_is_a_working_project(tmp_path):
     """
     The skeleton loads and passes the system checks without a database.
@@ -89,16 +115,67 @@ def test_scaffold_is_a_working_project(tmp_path):
     directory = tmp_path / 'shop'
     scaffold.write_files(directory, 'shop')
 
-    env = {k: v for k, v in os.environ.items() if not k.startswith(('BS_', 'DJANGO_'))}
-    done = subprocess.run(
-        [sys.executable, 'manage.py', 'bazis_doctor', '--json'],
-        cwd=directory, env=env, capture_output=True, text=True, timeout=300,
-    )
-    assert done.returncode == 0, done.stderr[-3000:]
-    assert json.loads(done.stdout) == []
+    assert doctor(directory) == []
     assert (directory / '.gitignore').read_text().startswith('.env\n')
     assert 'BS_SECRET_KEY=' in (directory / '.env').read_text()
     assert json.loads((directory / '.mcp.json').read_text())['mcpServers']['bazis']
+
+
+def test_scaffold_with_a_frontend(tmp_path, monkeypatch):
+    monkeypatch.delenv(scaffold.FRONTEND_REQUIREMENT_ENV, raising=False)
+    backend, product = tmp_path / 'backend', tmp_path / 'product'
+    scaffold.write_files(backend, 'shop')
+    scaffold.write_files(product, 'shop', frontend=True)
+
+    assert 'bazis-front' not in (backend / 'requirements.txt').read_text()
+    assert "BS_INSTALLED_APPS='[]'" in (backend / 'project.env').read_text()
+    assert '## Frontend' not in (backend / 'AGENTS.md').read_text()
+
+    assert (product / 'requirements.txt').read_text().splitlines() == [
+        *scaffold.REQUIREMENTS, 'bazis-front>=0.1.0',
+    ]
+    assert """BS_INSTALLED_APPS='["bazis.contrib.front"]'""" in (product / 'project.env').read_text()
+    agents_md = (product / 'AGENTS.md').read_text()
+    assert '## Frontend' in agents_md and 'frontend/AGENTS.md' in agents_md
+    # the agent creates the frontend with `bazis_front init`, after choosing the packages
+    assert not (product / 'frontend').exists() and not (product / 'spec').exists()
+
+
+def test_frontend_requirement_override(tmp_path, monkeypatch):
+    """
+    A bazis-front that is not on PyPI: a path or a URL instead of the requirement.
+    """
+    monkeypatch.setenv(scaffold.FRONTEND_REQUIREMENT_ENV, ' /wheels/bazis_front-0.1.0-py3-none-any.whl ')
+    scaffold.write_files(tmp_path, 'shop', frontend=True)
+    requirements = (tmp_path / 'requirements.txt').read_text().splitlines()
+    assert requirements[-1] == '/wheels/bazis_front-0.1.0-py3-none-any.whl'
+    assert not any(line.startswith('bazis-front') for line in requirements)
+
+    monkeypatch.setenv(scaffold.FRONTEND_REQUIREMENT_ENV, '')
+    assert scaffold.frontend_requirement() == scaffold.FRONTEND_REQUIREMENT
+
+
+def test_scaffold_with_a_frontend_is_a_working_project(tmp_path):
+    """
+    With bazis-front installed, the skeleton of a product passes the system checks before
+    its frontend exists.
+    """
+    pytest.importorskip('bazis.contrib.front')
+    directory = tmp_path / 'shop'
+    scaffold.write_files(directory, 'shop', frontend=True)
+
+    assert [m for m in doctor(directory) if m['level'] in ('error', 'critical', 'warning')] == []
+
+
+def test_node_problem(monkeypatch):
+    found = {'node': '/usr/bin/node', 'npm': '/usr/bin/npm'}
+    monkeypatch.setattr(scaffold.shutil, 'which', found.get)
+    assert node_problem() is None
+
+    del found['npm']
+    assert node_problem().startswith('npm not found')
+    found.clear()
+    assert node_problem().startswith('node and npm not found')
 
 
 def test_scaffold_refuses_a_directory_with_files(tmp_path):
@@ -224,11 +301,77 @@ def test_new(tmp_path, fake_agent, capsys):
     assert 'A library catalog with loans' in prompt
     assert options.cwd == str(directory.resolve())
     assert options.max_budget_usd == 5
+    # a product with its frontend by default
+    assert 'bazis-front' in (directory / 'requirements.txt').read_text()
+    assert agent.FRONTEND_RULES in options.system_prompt['append']
     out = capsys.readouterr()
     assert 'Reading the guide.' in out.out
     assert '> package_guide bazis' in out.out
     assert '> Bash .venv/bin/python manage.py check' in out.out
     assert '[3 turns, $0.50]' in out.err
+
+
+def test_new_prompt_of_a_product():
+    """
+    The prompt of a product with a frontend gives the order of the work of the guide of
+    bazis-front, with its commands and the MCP tools.
+    """
+    prompt = main.new_prompt('A help desk', 'helpdesk', frontend=True)
+
+    order = [
+        'package_guide("bazis-front")', 'bazis_front init', 'spec/product.yaml',
+        'spec/screens/', 'Make the backend satisfy the specs', 'e2e_data', 'manage.py migrate',
+        'bazis_front contract', 'as each `hint` says', 'front_catalog', 'bazis_front add',
+        'frontend/src/screens/', 'spec/design/', 'bazis_front design', 'bazis_front e2e',
+        'npx playwright install chromium', 'front_status', 'npx tsc --noEmit', 'npm run lint',
+        'npm test', 'npm run build', 'uvicorn helpdesk.main:app',
+    ]
+    positions = [prompt.index(text) for text in order]
+    assert positions == sorted(positions)
+    for text in ('front_check', 'test_user', 'access', 'scenarios', 'workflows', 'statuses'):
+        assert text in prompt
+    assert 'A help desk' in prompt
+    assert 'the description' in prompt
+
+
+def test_new_prompt_of_a_backend():
+    prompt = main.new_prompt('A help desk', 'helpdesk')
+    assert 'helpdesk/router.py' in prompt
+    assert 'bazis_front' not in prompt and 'front_check' not in prompt
+
+
+def test_frontend_rules():
+    for text in ('front_check', 'front_status', 'front_catalog', 'package_guide("bazis-front")',
+                 'frontend/AGENTS.md', 'e2e_data', 'E2E_PASSWORD', 'npm run e2e',
+                 'frontend/src/bazis/generated/', 'Node.js'):
+        assert text in agent.FRONTEND_RULES
+
+
+def test_new_without_a_frontend(tmp_path, fake_agent):
+    directory = tmp_path / 'library'
+    assert main.main(['new', str(directory), 'A library', '--no-venv', '--no-frontend']) == 0
+
+    prompt, options = fake_agent[0]
+    assert 'bazis_front' not in prompt
+    assert 'bazis-front' not in (directory / 'requirements.txt').read_text()
+    assert agent.FRONTEND_RULES not in options.system_prompt['append']
+
+
+def test_new_without_node(tmp_path, fake_agent, monkeypatch, capsys):
+    """
+    Without Node.js the product cannot get its frontend: nothing is written.
+    """
+    monkeypatch.setattr(scaffold, 'node_problem', lambda: 'node and npm not found: ...')
+    directory = tmp_path / 'library'
+
+    assert main.main(['new', str(directory), 'A library', '--no-venv']) == 1
+    err = capsys.readouterr().err
+    assert 'node and npm not found' in err and '--no-frontend' in err
+    assert not directory.exists()
+    assert fake_agent == []
+
+    # the backend alone needs no Node
+    assert main.main(['new', str(directory), 'A library', '--no-venv', '--no-frontend']) == 0
 
 
 def test_new_with_a_name(tmp_path, fake_agent):
@@ -245,6 +388,53 @@ def test_add(tmp_path, fake_agent):
     assert 'package_guide("bazis-permit")' in prompt
     assert 'users see only their orders' in prompt
     assert options.permission_mode == 'acceptEdits'
+    assert 'bazis_front' not in prompt
+    assert agent.FRONTEND_RULES not in options.system_prompt['append']
+
+
+def with_frontend(directory: Path) -> Path:
+    (directory / 'frontend').mkdir()
+    (directory / 'frontend' / 'bazis-front.lock.json').write_text('{}')
+    return directory
+
+
+def test_add_to_a_product_with_a_frontend(tmp_path, fake_agent, capsys):
+    assert main.main(['add', 'bazis-statusy', '--project-dir', str(with_frontend(tmp_path))]) == 0
+
+    prompt, options = fake_agent[0]
+    backend, frontend = prompt.split('The product has a frontend')
+    assert 'package_guide("bazis-statusy")' in backend
+    order = ['spec/', 'bazis_front contract', 'front_check', 'front_catalog', 'bazis_front add',
+             'bazis_front e2e', 'e2e_data', 'npx tsc --noEmit', 'npm test', 'npm run e2e']
+    positions = [frontend.index(text) for text in order]
+    assert positions == sorted(positions)
+    assert agent.FRONTEND_RULES in options.system_prompt['append']
+    assert 'warning' not in capsys.readouterr().err
+
+
+def test_add_the_frontend(tmp_path, fake_agent):
+    """
+    `bazis add bazis-front` to a backend: the frontend is built as by `bazis new`.
+    """
+    assert main.main(['add', 'bazis-front', 'a portal for the clients',
+                      '--project-dir', str(tmp_path)]) == 0
+
+    prompt, options = fake_agent[0]
+    assert 'package_guide("bazis-front")' in prompt
+    assert 'Then build the frontend of the product' in prompt
+    assert 'bazis_front init' in prompt and 'npm run build' in prompt
+    assert 'from the backend and what the project needs it for' in prompt
+    assert agent.FRONTEND_RULES in options.system_prompt['append']
+
+
+def test_add_without_node(tmp_path, fake_agent, monkeypatch, capsys):
+    """
+    In a product with a frontend, the agent runs without Node.js and says what did not run.
+    """
+    monkeypatch.setattr(scaffold, 'node_problem', lambda: 'node and npm not found: ...')
+    assert main.main(['add', 'bazis-statusy', '--project-dir', str(with_frontend(tmp_path))]) == 0
+    assert 'warning: node and npm not found' in capsys.readouterr().err
+    assert len(fake_agent) == 1
 
 
 @pytest.mark.parametrize('fix', [False, True])
@@ -255,6 +445,24 @@ def test_audit(tmp_path, fake_agent, fix):
     prompt, options = fake_agent[0]
     assert ('Change nothing' in prompt) is not fix
     assert (options.permission_mode == 'acceptEdits') is fix
+    assert 'front_check' not in prompt
+    assert '3. Report the problems' in prompt
+
+
+@pytest.mark.parametrize('fix', [False, True])
+def test_audit_of_a_product_with_a_frontend(tmp_path, fake_agent, fix):
+    args = ['audit', '--project-dir', str(with_frontend(tmp_path))] + (['--fix'] if fix else [])
+    assert main.main(args) == 0
+
+    prompt, options = fake_agent[0]
+    for text in ('front_check', 'front_status', 'package_guide("bazis-front")',
+                 'npx tsc --noEmit', 'npm run lint', 'npm test', 'npm run e2e'):
+        assert text in prompt
+    assert '4. Report the problems' in prompt
+    # a review cannot run commands: it lists them
+    assert ('cannot run' in prompt) is not fix
+    assert ('bazis_front contract --check' in prompt) is fix
+    assert agent.FRONTEND_RULES in options.system_prompt['append']
 
 
 def test_failed_run(tmp_path, monkeypatch, capsys):

@@ -77,6 +77,46 @@ separate package `bazis-<name>`. A project installs only the packages it needs.
   it, and what is left for the user (for example the database).
 """
 
+#: the rules of a project with a frontend made by bazis-front (Task.extra_rules)
+FRONTEND_RULES = """\
+# The frontend (bazis-front)
+
+The product has a frontend made by bazis-front: the specs of the product in `spec/`, the
+contract generated from the backend in `contract/`, the React app in `frontend/`. The
+guides are `package_guide("bazis-front")` and `frontend/AGENTS.md`: read them before you
+change the frontend and follow them exactly. All the frontend logic is in bazis-front: use
+its commands, do not write generators or frontends of your own.
+
+- The frontend is changed with the subcommands of `.venv/bin/python manage.py bazis_front`
+  (`init`, `contract`, `check`, `add`, `design`, `e2e`, `update`). The MCP tools read it: `front_check` (the issues of the specs
+  against the contract, with a `hint` each), `front_status` (what is stale and the command
+  that updates it) and `front_catalog` (the components, the capabilities and the assets
+  they require).
+- The specs describe the product and the backend is built to satisfy them. After every
+  change of the models, routes, roles, statuses or transits: migrate, export the contract
+  (`bazis_front contract`), then fix the spec or the backend until `front_check` reports
+  no errors.
+- Never edit `contract/`, `frontend/src/bazis/generated/`, `frontend/e2e/generated/`, the
+  copies of `frontend/src/bazis/client/`, `frontend/src/bazis/react/`,
+  `frontend/e2e/bazis/`, `frontend/bazis-front.lock.json` or `frontend/.bazis/`: generate
+  them again with the commands, and wrap the copies in the product code.
+- The backend decides the permissions (bazis-permit): never encode roles or permission
+  rules in the frontend. The screens use the tokens of the design, never literal colors.
+- The test data of the end-to-end tests is created by the management command `e2e_data`
+  of the project (`.venv/bin/python manage.py e2e_data`): the roles, statuses and
+  transits the specs need, a user per `test_user` of the roles with its role and the
+  password of the environment variable `E2E_PASSWORD`, and the items the scenarios open.
+  It can run again (it sets the passwords again).
+- After changing the frontend run in `frontend/` `npx tsc --noEmit`, `npm run lint` and
+  `npm test`; after changing the specs or the screens also `bazis_front e2e` and
+  `npm run e2e` against the running backend: migrate, run `e2e_data`, start
+  `.venv/bin/uvicorn <project package>.main:app --port 8000` in the background, run
+  `E2E_PASSWORD=<the same password> npm run e2e`, then stop the backend.
+- Node.js with npm is needed by `npm install`, the TypeScript of the contract
+  (`schema.d.ts`), the build and the tests of the frontend, and the contract by a migrated
+  database. Without them do the other steps and say which ones did not run.
+"""
+
 
 @dataclass
 class Task:
