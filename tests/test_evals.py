@@ -13,7 +13,9 @@
 # limitations under the License.
 
 import json
+import os
 import subprocess
+import time
 
 from bazis.contrib.cli import scaffold
 from bazis.contrib.mcp import catalog
@@ -136,3 +138,73 @@ def test_end_to_end_needs_the_test_data(tmp_path, monkeypatch):
 def test_project_package(tmp_path):
     scaffold.write_files(tmp_path / 'x', 'desk')
     assert grade.project_package(tmp_path / 'x') == 'desk'
+
+
+def test_a_command_that_hangs(tmp_path, monkeypatch):
+    """
+    A command over the timeout fails its check and its processes are killed; the grading
+    goes on.
+    """
+    monkeypatch.setattr(grade, 'TIMEOUT', 1)
+    started = time.monotonic()
+    done = grade.execute(['sh', '-c', 'sleep 60 & echo $!; wait'], tmp_path, dict(os.environ))
+
+    assert done.returncode == 124 and 'timed out' in done.stderr
+    assert time.monotonic() - started < 30
+    child = int(done.stdout.split()[0])
+    for _ in range(50):
+        try:
+            os.kill(child, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.1)
+    else:
+        raise AssertionError('the child of the command is alive')
+
+
+def test_a_command_that_is_missing(tmp_path):
+    assert grade.execute(['no-such-command-x'], tmp_path, {}).returncode == 127
+
+
+def test_end_to_end_uses_servers_of_its_own(tmp_path, monkeypatch):
+    """
+    The backend and the dev server of the frontend run on free ports of their own, and the
+    tests get the dev server in E2E_BASE_URL: they never start or reuse another one.
+    """
+    project = product(tmp_path, 1)
+    calls, started, stopped = [], [], []
+    monkeypatch.setattr(grade, 'run', lambda project, args, env: done())
+    monkeypatch.setattr(grade, 'npm', lambda frontend, args, env: calls.append((args, env)) or done())
+    ports = iter([8001, 5174])
+    monkeypatch.setattr(grade, 'free_port', lambda: next(ports))
+
+    def serve(command, cwd, env, port):
+        started.append((command, env, port))
+        return f'server-{port}'
+
+    monkeypatch.setattr(grade, 'serve', serve)
+    monkeypatch.setattr(grade, 'stop', stopped.append)
+
+    assert grade.end_to_end(project, {}).passed
+
+    (backend, _, api), (dev, dev_env, web) = started
+    assert 'desk.main:app' in backend and str(api) in backend
+    assert dev[1:3] == ['run', 'dev'] and dev[-2:] == [str(web), '--strictPort']
+    assert dev_env['BAZIS_API_URL'] == 'http://127.0.0.1:8001'
+    args, env = calls[-1]
+    assert args == ['run', 'e2e']
+    assert env['E2E_BASE_URL'] == 'http://127.0.0.1:5174'
+    assert env['E2E_PASSWORD'] == dev_env['E2E_PASSWORD']
+    assert stopped == ['server-8001', 'server-5174']
+
+
+def test_end_to_end_stops_the_backend_when_the_frontend_does_not_start(tmp_path, monkeypatch):
+    stopped = []
+    monkeypatch.setattr(grade, 'run', lambda project, args, env: done())
+    monkeypatch.setattr(grade, 'npm', lambda frontend, args, env: done())
+    monkeypatch.setattr(grade, 'serve', lambda command, cwd, env, port: None if 'dev' in command else 'api')
+    monkeypatch.setattr(grade, 'stop', stopped.append)
+
+    check = grade.end_to_end(product(tmp_path, 1), {})
+    assert not check.passed and 'npm run dev' in check.detail
+    assert stopped == ['api']

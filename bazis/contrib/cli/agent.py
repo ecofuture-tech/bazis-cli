@@ -102,11 +102,13 @@ its commands, do not write generators or frontends of your own.
   them again with the commands, and wrap the copies in the product code.
 - The backend decides the permissions (bazis-permit): never encode roles or permission
   rules in the frontend. The screens use the tokens of the design, never literal colors.
-- The test data of the end-to-end tests is created by the management command `e2e_data`
-  of the project (`.venv/bin/python manage.py e2e_data`): the roles, statuses and
-  transits the specs need, a user per `test_user` of the roles with its role and the
-  password of the environment variable `E2E_PASSWORD`, and the items the scenarios open.
-  It can run again (it sets the passwords again).
+- The permit roles with their permissions and the statuses and transits of the workflows
+  are data migrations: the contract is exported from the migrated database. The test
+  data of the end-to-end tests is the e2e data command recommended by bazis-front,
+  `.venv/bin/python manage.py e2e_data`: on top of the migrations it creates only a user
+  per `test_user` of the roles, with its role and the password of the environment
+  variable `E2E_PASSWORD`, and the records the scenarios need (the items they open). It
+  can run again (it sets the passwords again).
 - After changing the frontend run in `frontend/` `npx tsc --noEmit`, `npm run lint` and
   `npm test`; after changing the specs or the screens also `bazis_front e2e` and
   `npm run e2e` against the running backend: migrate, run `e2e_data`, start

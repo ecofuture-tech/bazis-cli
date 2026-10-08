@@ -13,10 +13,11 @@ Bazis. It is a tool for the developer's machine, not a dependency of a project.
   apps, migrations and tests. By default the product also gets its frontend: bazis-front
   is in `requirements.txt` and `BS_INSTALLED_APPS`, and the agent follows the order of the
   guide of bazis-front (`bazis_front init`, the specs in `spec/`, the backend that
-  satisfies them with the test data of `manage.py e2e_data`, migrate, `contract`, `check`
-  until no errors, `add`, the screens, `design`, `e2e` run against the backend, the final
-  checks). It needs Node.js with npm (checked before anything is written);
-  `--no-frontend` builds only the backend.
+  satisfies them with the roles, statuses and transits as data migrations and the test
+  users of `manage.py e2e_data`, migrate, `contract`, `check` until no errors, `add`, the
+  screens, `design`, `e2e` run against the backend, the final checks). It needs Node.js
+  22.12 or newer with npm (checked before anything is written); `--no-frontend` builds
+  only the backend.
 - `bazis add PACKAGE ["what for"]` installs a Bazis package and its Bazis dependencies and
   sets them up as their guides say. In a project with a frontend
   (`frontend/bazis-front.lock.json`) it then exports the contract, fixes `check`, copies

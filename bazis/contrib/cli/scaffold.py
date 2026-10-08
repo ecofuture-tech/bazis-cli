@@ -40,6 +40,9 @@ FRONTEND_APP = 'bazis.contrib.front'
 #: replaces FRONTEND_REQUIREMENT in requirements.txt: a pip requirement such as a path to a
 #: wheel or a checkout, or `bazis-front @ <url>`, to try a bazis-front that is not on PyPI
 FRONTEND_REQUIREMENT_ENV = 'BAZIS_FRONT_REQUIREMENT'
+#: the oldest Node.js of the frontend: `engines.node` of the template of bazis-front, which
+#: is a dependency of the project, not of the CLI (tests/test_cli.py compares them)
+NODE_VERSION = (22, 12)
 
 
 MANAGE_PY = '''#!/usr/bin/env python
@@ -191,7 +194,7 @@ AGENTS_MD_FRONTEND = '''
 The product has a frontend made by [bazis-front](https://github.com/ecofuture-tech/bazis-front)
 (`package_guide("bazis-front")` of the MCP server): the specs of the product in `spec/`,
 the contract generated from the backend in `contract/`, the React app in `frontend/` (its
-guide is `frontend/AGENTS.md`). Node.js with npm is needed for the frontend.
+guide is `frontend/AGENTS.md`). Node.js 22.12 or newer with npm is needed for the frontend.
 
 - The backend is built to satisfy the specs. After every change of the models, routes,
   roles, statuses or transits: migrate, `python manage.py bazis_front contract`, then
@@ -199,9 +202,12 @@ guide is `frontend/AGENTS.md`). Node.js with npm is needed for the frontend.
 - `contract/`, `frontend/src/bazis/generated/` and `frontend/e2e/generated/` are only
   generated (`bazis_front contract`, `design`, `e2e`), never edited; the MCP tool
   `front_status` says what is stale.
+- The permit roles and the statuses and transits are data migrations. The test data of the
+  end-to-end tests is `python manage.py e2e_data` (the e2e data command recommended by
+  bazis-front): the test users of the roles of the specs, with the password of
+  `E2E_PASSWORD`, and the records the scenarios need.
 - In `frontend/`: `npx tsc --noEmit`, `npm run lint`, `npm test`, and `npm run e2e` against
-  the running backend with the test data of `python manage.py e2e_data` and the password
-  of its test users in `E2E_PASSWORD`.
+  the running backend with that test data.
 '''
 
 
@@ -238,15 +244,29 @@ def frontend_requirement() -> str:
     return os.environ.get(FRONTEND_REQUIREMENT_ENV, '').strip() or FRONTEND_REQUIREMENT
 
 
-def node_problem() -> str | None:
+def node_problem(run=subprocess.run) -> str | None:
     """
-    Why the frontend cannot be built on this machine (Node.js and npm are missing), or None.
+    Why the frontend cannot be built on this machine (Node.js or npm are missing, or Node.js
+    is older than NODE_VERSION), or None.
     """
+    need = '.'.join(map(str, NODE_VERSION))
     missing = [tool for tool in ('node', 'npm') if shutil.which(tool) is None]
     if missing:
         return (
-            f'{" and ".join(missing)} not found: the frontend needs Node.js with npm '
-            '(https://nodejs.org)'
+            f'{" and ".join(missing)} not found: the frontend needs Node.js {need} or newer '
+            'with npm (https://nodejs.org)'
+        )
+    try:
+        found = run([shutil.which('node'), '--version'], capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError) as err:
+        return f'`node --version` failed ({err}): the frontend needs Node.js {need} or newer'
+    version = re.match(r'v?(\d+)\.(\d+)', found.stdout.strip())
+    if found.returncode or not version:
+        return f'`node --version` failed: the frontend needs Node.js {need} or newer'
+    if tuple(map(int, version.groups())) < NODE_VERSION:
+        return (
+            f'Node.js {found.stdout.strip()} is too old: the frontend needs Node.js {need} or '
+            'newer (https://nodejs.org)'
         )
     return None
 

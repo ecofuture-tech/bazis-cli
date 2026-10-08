@@ -46,8 +46,8 @@ bazis audit --fix
   that satisfies them, the contract exported from it (`contract/`), a React + TypeScript
   frontend (`frontend/`) with the screens composed from the components of bazis-front,
   and the end-to-end tests of the scenarios run against the backend. It needs Node.js
-  with npm, and PostgreSQL for the contract and the end-to-end tests; `--no-frontend`
-  builds only the backend.
+  22.12 or newer with npm, and PostgreSQL for the contract and the end-to-end tests;
+  `--no-frontend` builds only the backend.
 - `bazis add PACKAGE [GOAL]` installs a Bazis package with the Bazis packages it requires
   and sets them up as their guides say, in the frontend too when the project has one.
   `bazis add bazis-front` builds the frontend of a backend.
@@ -77,9 +77,10 @@ The tests of a project need PostgreSQL with PostGIS and Redis (settings in `.env
 them the agent creates the migrations and runs the system checks, and says that the tests
 did not run.
 
-The end-to-end tests of the frontend run against the backend with the test data of
-`python manage.py e2e_data` of the project, which sets the password of the test users from
-`E2E_PASSWORD`:
+The roles, statuses and transits of a product are data migrations. The end-to-end tests of
+the frontend run against the backend with the test data of `python manage.py e2e_data`
+(the e2e data command recommended by bazis-front): the test users of the roles, with the
+password of `E2E_PASSWORD`, and the records the scenarios need:
 
 ```bash
 E2E_PASSWORD=... .venv/bin/python manage.py e2e_data

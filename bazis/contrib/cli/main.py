@@ -48,8 +48,9 @@ FRONTEND_STEPS = """\
    references.
 3. Make the backend satisfy the specs: the apps, models, route sets and routers; the
    permit roles with the permissions of the access and the statuses and transits of the
-   workflows as data migrations; the management command `e2e_data` with the test users
-   and the items the scenarios open; tests; `makemigrations`; `run_doctor` without errors.
+   workflows as data migrations; the e2e data command recommended by bazis-front,
+   `e2e_data`, with only the test users and the records the scenarios need; tests;
+   `makemigrations`; `run_doctor` without errors.
 4. Migrate the database (`.venv/bin/python manage.py migrate`) and export the contract
    (`.venv/bin/python manage.py bazis_front contract`).
 5. Run `front_check` and fix the spec or the backend as each `hint` says until it reports
@@ -137,6 +138,11 @@ it requires that are not installed (`list_packages`), install them, follow the s
 guides, change the models and routes they concern, create the migrations, add tests, and
 make `run_doctor` pass without the warnings of the new packages.
 """
+    if args.package == 'bazis-front':
+        prompt += (
+            f'\nInstall bazis-front from the requirement `{scaffold.frontend_requirement()}`: '
+            'add this line to `requirements.txt` as it is.\n'
+        )
     frontend = has_frontend(project_dir)
     if frontend:
         prompt += """
@@ -250,7 +256,7 @@ def parser() -> argparse.ArgumentParser:
     new.add_argument(
         '--no-frontend', action='store_true',
         help='Build only the backend (by default the product also gets its frontend, made by '
-        'bazis-front: Node.js with npm is needed).',
+        'bazis-front: Node.js 22.12 or newer with npm is needed).',
     )
     new.set_defaults(make_task=new_task)
 

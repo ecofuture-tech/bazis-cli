@@ -84,11 +84,12 @@ def test_scaffold_refuses_a_bad_package_name(tmp_path):
 
 
 @pytest.fixture(autouse=True)
-def node(monkeypatch):
+def environment(monkeypatch):
     """
-    Node.js is found unless a test says otherwise.
+    Node.js is found unless a test says otherwise, and bazis-front is that of PyPI.
     """
     monkeypatch.setattr(scaffold, 'node_problem', lambda: None)
+    monkeypatch.delenv(scaffold.FRONTEND_REQUIREMENT_ENV, raising=False)
 
 
 def doctor(directory: Path) -> list:
@@ -121,8 +122,7 @@ def test_scaffold_is_a_working_project(tmp_path):
     assert json.loads((directory / '.mcp.json').read_text())['mcpServers']['bazis']
 
 
-def test_scaffold_with_a_frontend(tmp_path, monkeypatch):
-    monkeypatch.delenv(scaffold.FRONTEND_REQUIREMENT_ENV, raising=False)
+def test_scaffold_with_a_frontend(tmp_path):
     backend, product = tmp_path / 'backend', tmp_path / 'product'
     scaffold.write_files(backend, 'shop')
     scaffold.write_files(product, 'shop', frontend=True)
@@ -167,15 +167,42 @@ def test_scaffold_with_a_frontend_is_a_working_project(tmp_path):
     assert [m for m in doctor(directory) if m['level'] in ('error', 'critical', 'warning')] == []
 
 
+def node_version(stdout: str, returncode: int = 0):
+    def run(command, **kwargs):
+        assert command == ['/usr/bin/node', '--version']
+        return subprocess.CompletedProcess(command, returncode, stdout, '')
+
+    return run
+
+
 def test_node_problem(monkeypatch):
     found = {'node': '/usr/bin/node', 'npm': '/usr/bin/npm'}
     monkeypatch.setattr(scaffold.shutil, 'which', found.get)
-    assert node_problem() is None
+    assert node_problem(node_version('v22.12.0\n')) is None
+    assert node_problem(node_version('v24.1.3\n')) is None
+
+    too_old = node_problem(node_version('v22.11.9\n'))
+    assert too_old.startswith('Node.js v22.11.9 is too old') and '22.12 or newer' in too_old
+    assert node_problem(node_version('v18.20.0\n')).startswith('Node.js v18.20.0 is too old')
+    assert node_problem(node_version('', 1)).startswith('`node --version` failed')
 
     del found['npm']
     assert node_problem().startswith('npm not found')
     found.clear()
     assert node_problem().startswith('node and npm not found')
+
+
+def test_node_version_is_that_of_the_template():
+    """
+    NODE_VERSION follows `engines.node` of the template of bazis-front.
+    """
+    pytest.importorskip('bazis.contrib.front')
+    from importlib.resources import files
+
+    package = json.loads(
+        files('bazis.contrib.front').joinpath('assets/template/package.json').read_text()
+    )
+    assert package['engines']['node'] == '>=' + '.'.join(map(str, scaffold.NODE_VERSION))
 
 
 def test_scaffold_refuses_a_directory_with_files(tmp_path):
@@ -347,6 +374,20 @@ def test_frontend_rules():
         assert text in agent.FRONTEND_RULES
 
 
+def test_rules_and_steps_agree_on_the_test_data():
+    """
+    Roles, statuses and transits are data migrations (the contract is exported after
+    migrate); `e2e_data` only adds the test users and the records of the scenarios.
+    """
+    rules = ' '.join(agent.FRONTEND_RULES.split())
+    steps = ' '.join(main.FRONTEND_STEPS.split())
+    for text in (rules, steps):
+        assert 'statuses and transits of the workflows' in text and 'data migrations' in text
+        assert 'the e2e data command recommended by bazis-front' in text
+    assert 'it creates only a user per `test_user`' in rules
+    assert '`e2e_data`, with only the test users and the records the scenarios need' in steps
+
+
 def test_new_without_a_frontend(tmp_path, fake_agent):
     directory = tmp_path / 'library'
     assert main.main(['new', str(directory), 'A library', '--no-venv', '--no-frontend']) == 0
@@ -410,6 +451,7 @@ def test_add_to_a_product_with_a_frontend(tmp_path, fake_agent, capsys):
     assert positions == sorted(positions)
     assert agent.FRONTEND_RULES in options.system_prompt['append']
     assert 'warning' not in capsys.readouterr().err
+    assert 'Install bazis-front from the requirement' not in prompt
 
 
 def test_add_the_frontend(tmp_path, fake_agent):
@@ -424,7 +466,20 @@ def test_add_the_frontend(tmp_path, fake_agent):
     assert 'Then build the frontend of the product' in prompt
     assert 'bazis_front init' in prompt and 'npm run build' in prompt
     assert 'from the backend and what the project needs it for' in prompt
+    assert 'requirement `bazis-front>=0.1.0`' in prompt
     assert agent.FRONTEND_RULES in options.system_prompt['append']
+
+
+def test_add_the_frontend_from_a_build(tmp_path, fake_agent, monkeypatch):
+    """
+    `bazis add bazis-front` installs the bazis-front of BAZIS_FRONT_REQUIREMENT too.
+    """
+    monkeypatch.setenv(scaffold.FRONTEND_REQUIREMENT_ENV, '/wheels/bazis_front-0.1.0.whl')
+    assert main.main(['add', 'bazis-front', '--project-dir', str(tmp_path)]) == 0
+
+    prompt, _ = fake_agent[0]
+    assert 'requirement `/wheels/bazis_front-0.1.0.whl`' in prompt
+    assert 'bazis-front>=0.1.0' not in prompt
 
 
 def test_add_without_node(tmp_path, fake_agent, monkeypatch, capsys):

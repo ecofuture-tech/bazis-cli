@@ -28,6 +28,7 @@ import os
 import re
 import secrets
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -60,11 +61,48 @@ def python_of(project: Path) -> str:
     return sys.executable
 
 
+def execute(command: list[str], cwd: Path, env: dict) -> subprocess.CompletedProcess:
+    """
+    Runs a command in a process group of its own. A command that takes longer than TIMEOUT
+    fails (return code 124) and its whole group is killed, so that no dev server or browser
+    it started stays alive and the other checks still run.
+    """
+    try:
+        process = subprocess.Popen(
+            command, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            stdin=subprocess.DEVNULL, text=True, start_new_session=True,
+        )
+    except FileNotFoundError:
+        return subprocess.CompletedProcess(command, 127, '', f'{command[0]} not found')
+    try:
+        stdout, stderr = process.communicate(timeout=TIMEOUT)
+    except subprocess.TimeoutExpired:
+        stop(process, kill=True)
+        stdout, stderr = process.communicate()
+        return subprocess.CompletedProcess(
+            command, 124, stdout, f'{stderr}\ntimed out after {TIMEOUT} seconds',
+        )
+    return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+
+
+def stop(process: subprocess.Popen, kill: bool = False) -> None:
+    """
+    Stops a process started in a session of its own with the processes it started (also
+    when it has exited and they have not).
+    """
+    try:
+        os.killpg(process.pid, signal.SIGKILL if kill else signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    try:
+        process.wait(timeout=30)
+    except subprocess.TimeoutExpired:
+        if not kill:
+            stop(process, kill=True)
+
+
 def run(project: Path, args: list[str], env: dict) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        [python_of(project), *args], cwd=project, env=env, capture_output=True, text=True,
-        timeout=TIMEOUT, stdin=subprocess.DEVNULL,
-    )
+    return execute([python_of(project), *args], project, env)
 
 
 def json_in(text: str):
@@ -179,14 +217,7 @@ def grade(project: Path, task: dict) -> list[Check]:
 
 
 def npm(frontend: Path, args: list[str], env: dict) -> subprocess.CompletedProcess:
-    command = [shutil.which('npm') or 'npm', *args]
-    try:
-        return subprocess.run(
-            command, cwd=frontend, env=env, capture_output=True, text=True, timeout=TIMEOUT,
-            stdin=subprocess.DEVNULL,
-        )
-    except FileNotFoundError:
-        return subprocess.CompletedProcess(command, 127, '', 'npm not found')
+    return execute([shutil.which('npm') or 'npm', *args], frontend, env)
 
 
 def frontend_checks(project: Path, env: dict, min_scenarios: int) -> list[Check]:
@@ -261,10 +292,26 @@ def wait_for_port(port: int, server: subprocess.Popen, seconds: int = 60) -> boo
     return False
 
 
+def serve(command: list[str], cwd: Path, env: dict, port: int) -> subprocess.Popen | None:
+    """
+    Starts a server in a session of its own and waits until it listens on the port; None
+    if it did not start (it is stopped then).
+    """
+    server = subprocess.Popen(
+        command, cwd=cwd, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        stdin=subprocess.DEVNULL, start_new_session=True,
+    )
+    if wait_for_port(port, server):
+        return server
+    stop(server)
+    return None
+
+
 def end_to_end(project: Path, env: dict) -> Check:
     """
-    The end-to-end tests of the frontend against the backend (uvicorn on a free port) with
-    the test data of `manage.py e2e_data`.
+    The end-to-end tests of the frontend against the backend (uvicorn) and the dev server of
+    the frontend (Vite, its `/api` going to the backend), both on free ports of their own,
+    with the test data of `manage.py e2e_data`.
     """
     name = 'end-to-end tests pass'
     password = secrets.token_urlsafe(12)
@@ -276,24 +323,32 @@ def end_to_end(project: Path, env: dict) -> Check:
     browser = npm(frontend, ['exec', '--', 'playwright', 'install', 'chromium'], env)
     if browser.returncode:
         return Check(name, False, 'playwright install: ' + tail(browser, 6))
-    port = free_port()
-    server = subprocess.Popen(
-        [python_of(project), '-m', 'uvicorn', f'{project_package(project)}.main:app',
-         '--host', '127.0.0.1', '--port', str(port)],
-        cwd=project, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        stdin=subprocess.DEVNULL,
-    )
+    servers = []
     try:
-        if not wait_for_port(port, server):
+        api, web = free_port(), free_port()
+        backend = serve(
+            [python_of(project), '-m', 'uvicorn', f'{project_package(project)}.main:app',
+             '--host', '127.0.0.1', '--port', str(api)],
+            project, env, api,
+        )
+        if backend is None:
             return Check(name, False, 'the backend did not start (uvicorn)')
-        tests = npm(frontend, ['run', 'e2e'], {**env, 'BAZIS_API_URL': f'http://127.0.0.1:{port}'})
+        servers.append(backend)
+        env = {**env, 'BAZIS_API_URL': f'http://127.0.0.1:{api}'}
+        dev = serve(
+            [shutil.which('npm') or 'npm', 'run', 'dev', '--', '--host', '127.0.0.1',
+             '--port', str(web), '--strictPort'],
+            frontend, env, web,
+        )
+        if dev is None:
+            return Check(name, False, 'the dev server of the frontend did not start (npm run dev)')
+        servers.append(dev)
+        # E2E_BASE_URL: the tests use this dev server and never start or reuse another one
+        tests = npm(frontend, ['run', 'e2e'], {**env, 'E2E_BASE_URL': f'http://127.0.0.1:{web}'})
         return Check(name, tests.returncode == 0, tail(tests, 10))
     finally:
-        server.terminate()
-        try:
-            server.wait(timeout=30)
-        except subprocess.TimeoutExpired:
-            server.kill()
+        for server in servers:
+            stop(server)
 
 
 def frontend_database_checks(project: Path, env: dict, migrated: bool, reason: str = '') -> list[Check]:

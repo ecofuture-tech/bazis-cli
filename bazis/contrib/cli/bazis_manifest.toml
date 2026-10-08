@@ -32,10 +32,10 @@ text = "the system checks run the project code with its .venv, also in a read-on
 text = "the tests of a new project need PostgreSQL with PostGIS and Redis (.env); without them the agent only checks and migrates"
 
 [[pitfalls]]
-text = "bazis new builds the frontend by default and then needs Node.js with npm; --no-frontend builds only the backend, and bazis add bazis-front adds the frontend later"
+text = "bazis new builds the frontend by default and then needs Node.js 22.12 or newer with npm; --no-frontend builds only the backend, and bazis add bazis-front adds the frontend later"
 
 [[pitfalls]]
-text = "the contract and the end-to-end tests of the frontend need a migrated PostgreSQL database; the test data of the end-to-end tests is the management command e2e_data of the project (E2E_PASSWORD)"
+text = "the contract and the end-to-end tests of the frontend need a migrated PostgreSQL database; roles, statuses and transits are data migrations, and the test users and records of the end-to-end tests come from manage.py e2e_data, the e2e data command recommended by bazis-front (E2E_PASSWORD)"
 
 [[pitfalls]]
 text = "BAZIS_FRONT_REQUIREMENT replaces the requirement of bazis-front in requirements.txt of a new product (a path to a wheel or a checkout, or a URL) to try a bazis-front that is not on PyPI"
