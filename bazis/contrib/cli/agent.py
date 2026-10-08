@@ -71,10 +71,42 @@ separate package `bazis-<name>`. A project installs only the packages it needs.
   tests with `.venv/bin/python -m pytest` when PostgreSQL and Redis are available (`.env`);
   if they are not, say so instead of skipping the tests silently.
 - Write tests for the behavior you add (`tests/`), with `bazis_test_utils` as the guides show.
+- The tests share Redis (`BS_CACHES__DEFAULT__LOCATION`) with the running backend and other
+  projects: never flush its database or call `cache.clear()`. The session fixture of
+  `tests/conftest.py` gives the cache keys of the tests a prefix of their own and deletes
+  only them at the end: keep it, and delete only those keys (`cache.delete_pattern('*')`).
+  A test with `transaction=True` empties the tables after it: before creating data again
+  (roles, statuses), delete those keys and call `ContentType.objects.clear_cache()`.
+- With bazis-users, the root router module imports `bazis.contrib.users.token` (the token
+  endpoint) unless it registers the user routes (`users.E002`), and a user model of the
+  project has `UserLanguageMixin`, so that the language of a user follows him.
 - Never read, print or copy the values of `.env`. Never run git commands that change the
   repository (commit, push, reset): the user reviews and commits the changes.
 - End with a short summary: what you built or changed, the Bazis packages used, how to run
   it, and what is left for the user (for example the database).
+
+# Languages
+
+The languages of the product are `BS_LANGUAGES` and `BS_LANGUAGE_CODE` of `project.env`;
+English, the language of the msgids, is always one of them.
+
+- The texts of the code are English msgids through `gettext_lazy`
+  (`from django.utils.translation import gettext_lazy as _`): `verbose_name`, `help_text`,
+  the labels of `choices`, the titles and the messages. Keep them lazy (no `str()` or
+  f-string of them). No text in another language in the code; the data migrations set the
+  names of the roles, statuses and transits in the column of each language.
+- Translate them into every other language in the catalog of the project,
+  `locale/<language>/LC_MESSAGES/django.po`: create `locale/` first (otherwise the
+  messages go to a catalog of a package), run `.venv/bin/python manage.py makemessages
+  -l <language> --ignore frontend --ignore static --ignore media`, fill every msgstr, then
+  compile only the catalogs of the project with `.venv/bin/django-admin compilemessages
+  -l <language> --ignore .venv --ignore frontend` (without the settings: `manage.py`
+  would also compile the catalogs of the packages in `.venv`); keep the `.po` and the
+  `.mo` files.
+- `run_doctor` must report no `bazis.W004` (two catalogs translate a msgid differently)
+  and no `bazis.W005` (a language without the translations of the texts of a Bazis
+  package: translate those msgids in the catalog of the project, and add them again after
+  every `makemessages`, which marks the msgids that are not in the code obsolete).
 """
 
 #: the rules of a project with a frontend made by bazis-front (Task.extra_rules)
@@ -102,6 +134,11 @@ its commands, do not write generators or frontends of your own.
   them again with the commands, and wrap the copies in the product code.
 - The backend decides the permissions (bazis-permit): never encode roles or permission
   rules in the frontend. The screens use the tokens of the design, never literal colors.
+- The frontend is in the languages of the backend (`languages` and `language` of
+  `spec/product.yaml` as `BS_LANGUAGES` and `BS_LANGUAGE_CODE`): every text of a screen
+  goes through `t()` with a key in the dictionaries of the product,
+  `frontend/src/i18n/<language>.ts`, one for each language (listed in
+  `frontend/src/i18n/index.ts`); never a text in the JSX.
 - The permit roles with their permissions and the statuses and transits of the workflows
   are data migrations: the contract is exported from the migrated database. The test
   data of the end-to-end tests is the e2e data command recommended by bazis-front,

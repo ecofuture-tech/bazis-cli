@@ -3,7 +3,9 @@
 # project needs; the minimums keep the grader independent of the names the agent chooses.
 # `frontend = true` builds the whole product with its frontend (bazis-front, Node.js) and
 # grades it too, with at least `min_scenarios` end-to-end scenarios; the other tasks are
-# built with `--no-frontend`.
+# built with `--no-frontend`. `language` is the language of a description that is not in
+# English: the agent finds it (without `--language`), and the product must be in it and in
+# English, with its catalog compiled.
 
 [[task]]
 id = "tracker"
@@ -51,6 +53,17 @@ create a category with dozens of products in one request that succeeds or fails 
 expected_packages = ["bazis-bulk"]
 min_models = 2
 min_routes = 2
+min_tests = 3
+
+[[task]]
+id = "recipes"
+language = "ru"
+description = """Книга рецептов: рецепты с названием, описанием и временем приготовления в \
+минутах, ингредиенты рецепта с количеством и единицей измерения (граммы, миллилитры, штуки). \
+API выдаёт рецепты и фильтрует их по времени приготовления."""
+expected_packages = []
+min_models = 2
+min_routes = 1
 min_tests = 3
 
 [[task]]

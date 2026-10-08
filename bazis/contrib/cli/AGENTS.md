@@ -17,7 +17,13 @@ Bazis. It is a tool for the developer's machine, not a dependency of a project.
   users of `manage.py e2e_data`, migrate, `contract`, `check` until no errors, `add`, the
   screens, `design`, `e2e` run against the backend, the final checks). It needs Node.js
   22.12 or newer with npm (checked before anything is written); `--no-frontend` builds
-  only the backend.
+  only the backend. The product is in the language of the description (the agent sets
+  `BS_LANGUAGES` and `BS_LANGUAGE_CODE`) or of `--language CODE` (written by the
+  skeleton), and always in English: English msgids with `gettext_lazy`, the catalog
+  `locale/<language>/LC_MESSAGES/django.po` compiled, the texts of the screens through
+  `t()` of bazis-front, `bazis.W004` and `bazis.W005` clean. The `tests/conftest.py` of the
+  skeleton gives the cache keys of the tests a prefix of their own: the tests never flush
+  the shared Redis.
 - `bazis add PACKAGE ["what for"]` installs a Bazis package and its Bazis dependencies and
   sets them up as their guides say. In a project with a frontend
   (`frontend/bazis-front.lock.json`) it then exports the contract, fixes `check`, copies

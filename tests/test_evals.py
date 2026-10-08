@@ -33,7 +33,30 @@ def test_tasks_are_valid():
         assert set(task['expected_packages']) <= known, task['id']
         assert task['min_models'] >= 1 and task['min_routes'] >= 1 and task['min_tests'] >= 1
         assert task.get('min_scenarios', 1) >= 1
+        if 'language' in task:
+            assert task['language'] != 'en'
+            assert scaffold.product_language(task['language'])[0] == task['language']
     assert any(t.get('frontend') for t in tasks)
+    assert any(t.get('language') for t in tasks)
+
+
+def test_language_check(tmp_path):
+    info = {'settings': [
+        {'name': 'LANGUAGES', 'value': [['ru', 'Русский'], ['en', 'English']]},
+        {'name': 'LANGUAGE_CODE', 'value': 'ru'},
+    ]}
+    check = grade.language_check(tmp_path, info, 'ru')
+    assert not check.passed and check.detail == 'no locale/ru/LC_MESSAGES/django.mo'
+
+    catalog = tmp_path / 'shop' / 'locale' / 'ru' / 'LC_MESSAGES'
+    catalog.mkdir(parents=True)
+    (catalog / 'django.mo').write_bytes(b'')
+    assert grade.language_check(tmp_path, info, 'ru').passed
+
+    info = {'settings': [{'name': 'LANGUAGES', 'value': [['en', 'English']]},
+                         {'name': 'LANGUAGE_CODE', 'value': 'en'}]}
+    check = grade.language_check(tmp_path, info, 'ru')
+    assert check.detail == "LANGUAGE_CODE is 'en'; LANGUAGES are ['en']"
 
 
 def test_json_in_output_with_other_lines():

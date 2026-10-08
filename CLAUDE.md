@@ -8,7 +8,9 @@ Bazis (`agent.RULES`).
 - `bazis/contrib/cli/agent.py` — the options of the agent (tools, permissions, MCP server),
   the permission prompt in the terminal and the output;
 - `bazis/contrib/cli/scaffold.py` — the skeleton of a new project and its `.venv`, with
-  bazis-front in its requirements and apps unless `--no-frontend`, and the check of Node.js.
+  bazis-front in its requirements and apps unless `--no-frontend`, its languages
+  (`--language`, else English until the agent sets the language of the description), and
+  the check of Node.js.
 
 The frontend of a product is made by bazis-front (`manage.py bazis_front ...`) and read by
 the tools of bazis-mcp (`front_check`, `front_status`, `front_catalog`): bazis-cli only

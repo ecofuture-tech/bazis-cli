@@ -122,6 +122,79 @@ def test_scaffold_is_a_working_project(tmp_path):
     assert json.loads((directory / '.mcp.json').read_text())['mcpServers']['bazis']
 
 
+def test_product_language():
+    """
+    A code is matched by itself, else by its base code, as the core matches the language of
+    a request; the name is the own name of the language.
+    """
+    for code in ('ru', 'ru-RU', 'RU', 'ru_RU', ' ru '):
+        assert scaffold.product_language(code) == ('ru', 'Русский')
+    assert scaffold.product_language('pt_BR') == ('pt-br', 'Português Brasileiro')
+    assert scaffold.product_language('zh-cn')[0] == 'zh-hans'
+    assert scaffold.product_language('en-US') == ('en', 'English')
+    with pytest.raises(scaffold.ScaffoldError, match='not a language of Django'):
+        scaffold.product_language('xx')
+
+    assert scaffold.languages('ru') == [['ru', 'Русский'], ['en', 'English']]
+    assert scaffold.languages('en') == [['en', 'English']]
+
+
+def test_scaffold_in_a_language(tmp_path):
+    """
+    The skeleton of a product in Russian: Russian by default and English, and the checks of
+    the translations (bazis.W005) pass.
+    """
+    directory = tmp_path / 'shop'
+    scaffold.write_files(directory, 'shop', language='ru')
+
+    env = (directory / 'project.env').read_text(encoding='utf-8')
+    assert """BS_LANGUAGES='[["ru", "Русский"], ["en", "English"]]'""" in env
+    assert 'BS_LANGUAGE_CODE=ru\n' in env
+    assert doctor(directory) == []
+
+    english = tmp_path / 'en'
+    scaffold.write_files(english, 'shop')
+    env = (english / 'project.env').read_text(encoding='utf-8')
+    assert """BS_LANGUAGES='[["en", "English"]]'""" in env and 'BS_LANGUAGE_CODE=en\n' in env
+
+
+def test_tests_of_a_scaffold_keep_their_cache_keys_apart(tmp_path):
+    """
+    The conftest of the skeleton gives the cache keys of the tests a prefix of their own, new
+    at every run, in every thread (the endpoints run in a thread pool); it works without
+    Redis (here an address where nothing listens).
+    """
+    pytest.importorskip('pytest_django')
+    directory = tmp_path / 'shop'
+    scaffold.write_files(directory, 'shop')
+    (directory / 'tests' / 'test_cache.py').write_text("""\
+import threading
+
+from django.core.cache import cache
+
+
+def test_prefix():
+    keys = [cache.make_key('x')]
+    thread = threading.Thread(target=lambda: keys.append(cache.make_key('x')))
+    thread.start()
+    thread.join()
+    prefix = keys[0].split(':')[0]
+    assert prefix.startswith('shop-tests-') and len(prefix) == len('shop-tests-') + 8
+    assert keys[1] == keys[0]
+""")
+    env = {
+        **{k: v for k, v in os.environ.items()
+           if not k.startswith(('BS_', 'DJANGO_')) or k.endswith('_LIBRARY_PATH')},
+        'BS_CACHES__DEFAULT__LOCATION': 'redis://127.0.0.1:1/0',
+    }
+    done = subprocess.run(
+        [sys.executable, '-m', 'pytest', '-q', '-p', 'no:cacheprovider'],
+        cwd=directory, env=env, capture_output=True, text=True, timeout=300,
+    )
+    assert done.returncode == 0, (done.stdout + done.stderr)[-3000:]
+    assert '1 passed' in done.stdout
+
+
 def test_scaffold_with_a_frontend(tmp_path):
     backend, product = tmp_path / 'backend', tmp_path / 'product'
     scaffold.write_files(backend, 'shop')
@@ -332,6 +405,9 @@ def test_new(tmp_path, fake_agent, capsys):
     assert 'bazis-front' in (directory / 'requirements.txt').read_text()
     assert agent.FRONTEND_RULES in options.system_prompt['append']
     out = capsys.readouterr()
+    # the language of the product is that of the description
+    assert 'the language of the description' in prompt and 'BS_LANGUAGE_CODE=<code>' in prompt
+    assert 'BS_LANGUAGE_CODE=en\n' in (directory / 'project.env').read_text()
     assert 'Reading the guide.' in out.out
     assert '> package_guide bazis' in out.out
     assert '> Bash .venv/bin/python manage.py check' in out.out
@@ -413,6 +489,38 @@ def test_new_without_node(tmp_path, fake_agent, monkeypatch, capsys):
 
     # the backend alone needs no Node
     assert main.main(['new', str(directory), 'A library', '--no-venv', '--no-frontend']) == 0
+
+
+def test_new_with_a_language(tmp_path, fake_agent):
+    directory = tmp_path / 'library'
+    args = ['new', str(directory), 'Каталог библиотеки', '--language', 'ru-RU', '--no-venv']
+    assert main.main(args) == 0
+
+    assert 'BS_LANGUAGE_CODE=ru\n' in (directory / 'project.env').read_text(encoding='utf-8')
+    prompt, _ = fake_agent[0]
+    assert 'The product is in Русский (`ru`) and English' in prompt
+    assert 'the language of the description' not in prompt
+
+
+def test_new_with_an_unknown_language(tmp_path, fake_agent, capsys):
+    directory = tmp_path / 'library'
+    assert main.main(['new', str(directory), 'A library', '--language', 'xx', '--no-venv']) == 1
+    assert 'not a language of Django' in capsys.readouterr().err
+    assert not directory.exists()
+    assert fake_agent == []
+
+
+def test_rules_of_the_languages_and_the_tests():
+    rules = ' '.join(agent.RULES.split())
+    for text in ('gettext_lazy', 'English msgids', 'locale/<language>/LC_MESSAGES/django.po',
+                 'makemessages', 'compilemessages', 'bazis.W004', 'bazis.W005',
+                 'never flush', 'cache.clear()', "cache.delete_pattern('*')",
+                 'ContentType.objects.clear_cache()', 'bazis.contrib.users.token',
+                 'users.E002', 'UserLanguageMixin'):
+        assert text in rules, text
+    frontend = ' '.join(agent.FRONTEND_RULES.split())
+    for text in ('t()', 'frontend/src/i18n/<language>.ts', '`languages` and `language`'):
+        assert text in frontend, text
 
 
 def test_new_with_a_name(tmp_path, fake_agent):

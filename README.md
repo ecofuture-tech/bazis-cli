@@ -26,6 +26,9 @@ users see only their own orders"
 # only the backend
 bazis new shop "..." --no-frontend
 
+# a product in Russian (by default in the language of the description), always also in English
+bazis new shop "..." --language ru
+
 # a Bazis package for an existing project (run in the directory of manage.py)
 bazis add bazis-statusy "orders go through new -> paid -> shipped"
 
@@ -48,6 +51,11 @@ bazis audit --fix
   and the end-to-end tests of the scenarios run against the backend. It needs Node.js
   22.12 or newer with npm, and PostgreSQL for the contract and the end-to-end tests;
   `--no-frontend` builds only the backend.
+- The product is in the language of its description and in English, the language of the
+  msgids of the code (`BS_LANGUAGES`, `BS_LANGUAGE_CODE`); `--language CODE` (a code of
+  Django such as `ru` or `pt-br`) chooses it instead. The texts of the backend are
+  translated in its gettext catalog and those of the screens in the dictionaries of the
+  frontend.
 - `bazis add PACKAGE [GOAL]` installs a Bazis package with the Bazis packages it requires
   and sets them up as their guides say, in the frontend too when the project has one.
   `bazis add bazis-front` builds the frontend of a backend.

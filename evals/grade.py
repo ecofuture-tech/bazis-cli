@@ -20,7 +20,8 @@ the expected Bazis packages, complete migrations that apply, models and routes o
 and tests that pass. A product with a frontend (`frontend = true`) also needs specs valid
 against a fresh contract, generated files that are not stale, a frontend that builds and
 passes its lint and component tests, and end-to-end tests of its scenarios that pass
-against the backend with the test data of `manage.py e2e_data` (Node.js is needed).
+against the backend with the test data of `manage.py e2e_data` (Node.js is needed). A task
+with a `language` needs the product in that language and in English, with its catalog.
 The grader runs on POSIX only (macOS, Linux): it stops the servers and the commands it
 starts by their process group.
 """
@@ -165,6 +166,9 @@ def grade(project: Path, task: dict) -> list[Check]:
     missing = sorted(set(task.get('expected_packages', [])) - installed)
     checks.append(Check('expected Bazis packages', not missing, 'missing: ' + ', '.join(missing) if missing else ''))
 
+    if task.get('language'):
+        checks.append(language_check(project, info, task['language']))
+
     apps = local_apps(project)
     models = [m['model'] for m in info.get('models', []) if m['model'].split('.')[0] in apps]
     checks.append(Check(
@@ -216,6 +220,24 @@ def grade(project: Path, task: dict) -> list[Check]:
     else:
         checks.append(Check('tests pass', False, 'no tests'))
     return checks
+
+
+def language_check(project: Path, info: dict, language: str) -> Check:
+    """
+    The product is in the language of its description and in English (`LANGUAGES`), the
+    first by default (`LANGUAGE_CODE`), with the catalog of the project compiled.
+    """
+    settings = {s['name']: s.get('value') for s in info.get('settings', [])}
+    codes = [code for code, _name in settings.get('LANGUAGES') or []]
+    problems = []
+    if settings.get('LANGUAGE_CODE') != language:
+        problems.append(f'LANGUAGE_CODE is {settings.get("LANGUAGE_CODE")!r}')
+    if not {language, 'en'} <= set(codes):
+        problems.append(f'LANGUAGES are {codes}')
+    catalog = f'locale/{language}/LC_MESSAGES/django.mo'
+    if not [*project.glob(catalog), *project.glob(f'*/{catalog}')]:
+        problems.append(f'no {catalog}')
+    return Check(f'product in {language} and en', not problems, '; '.join(problems))
 
 
 def npm(frontend: Path, args: list[str], env: dict) -> subprocess.CompletedProcess:

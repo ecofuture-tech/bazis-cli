@@ -55,6 +55,7 @@ async def build(task: dict, project: Path, args) -> dict:
     """
     name = scaffold.package_name(project)
     frontend = task.get('frontend', False)
+    # without --language: the agent finds the `language` of a task in its description
     scaffold.write_files(project, name, frontend=frontend)
     scaffold.create_venv(project)
     started = time.monotonic()

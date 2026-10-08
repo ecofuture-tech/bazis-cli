@@ -31,7 +31,7 @@ from pathlib import Path
 
 
 #: the packages of every project; the agent adds the Bazis packages the project needs
-REQUIREMENTS = ['bazis>=2.4.1']
+REQUIREMENTS = ['bazis>=2.8.0']
 REQUIREMENTS_DEV = ['bazis-mcp>=2.4.5', 'bazis-test-utils>=2.4.0']
 
 #: the frontend layer of a product (`bazis new` without `--no-frontend`)
@@ -130,7 +130,8 @@ BS_ROOT_URLCONF={name}.urls
 BS_BAZIS_ROUTER_MODULE={name}.router
 BS_WSGI_APPLICATION={name}.wsgi.application
 BS_DEFAULT_AUTO_FIELD=django.db.models.BigAutoField
-BS_LANGUAGE_CODE=en
+BS_LANGUAGES='{languages}'
+BS_LANGUAGE_CODE={language}
 BS_TEMPLATES='{templates}'
 '''
 
@@ -158,7 +159,27 @@ PYTEST_INI = '''[pytest]
 DJANGO_SETTINGS_MODULE = {name}.settings
 '''
 
-CONFTEST_PY = '''import pytest
+CONFTEST_PY = '''import uuid
+
+import pytest
+from django.test import override_settings
+
+
+@pytest.fixture(scope='session', autouse=True)
+def cache_of_the_tests():
+    """
+    The tests share Redis (BS_CACHES__DEFAULT__LOCATION) with the backend and the other
+    projects that use it: their cache keys have a prefix of their own, new at every run, and
+    only those keys are deleted. Never flush the Redis database or call cache.clear().
+    """
+    from django.conf import settings
+    from django.core.cache import cache
+
+    default = {{**settings.CACHES['default'], 'KEY_PREFIX': f'{name}-tests-{{uuid.uuid4().hex[:8]}}'}}
+    # the cache connections of all the threads, also of the endpoints, are made again
+    with override_settings(CACHES={{**settings.CACHES, 'default': default}}):
+        yield
+        cache.delete_pattern('*')
 
 
 @pytest.fixture
@@ -185,7 +206,11 @@ FastAPI and Pydantic.
   packages and the facts and checks of this project. Read the guide of a package before
   using it, and run `python manage.py bazis_doctor` and the tests after every change.
 - PostgreSQL with PostGIS and Redis are required to run the project and the tests
-  (`.env`); the checks and `makemigrations` work without them.
+  (`.env`); the checks and `makemigrations` work without them. The tests share Redis: they
+  never flush it, their cache keys have a prefix of their own (`tests/conftest.py`).
+- The languages are `BS_LANGUAGES` and `BS_LANGUAGE_CODE` (`project.env`), English always
+  among them: the texts of the code are English msgids (`gettext_lazy`), translated in
+  `locale/<language>/LC_MESSAGES/django.po` and compiled (`compilemessages`).
 '''
 
 AGENTS_MD_FRONTEND = '''
@@ -271,11 +296,42 @@ def node_problem(run=subprocess.run) -> str | None:
     return None
 
 
-def write_files(directory: Path, name: str, frontend: bool = False) -> list[Path]:
+def product_language(code: str) -> tuple[str, str]:
     """
-    Writes the skeleton of the project, with bazis-front in its requirements and apps when
-    it has a `frontend` (the agent creates the frontend itself with `bazis_front init`).
-    Fails if the directory has files already.
+    The language of a product, as a code of Django and its own name, from a code such as
+    `ru`, `ru-RU`, `RU` or `pt_BR` (matched by itself, else by its base code, as the core
+    matches the language of a request).
+    """
+    from django.conf.locale import LANG_INFO
+
+    wanted = code.strip().lower().replace('_', '-')
+    for candidate in (wanted, wanted.split('-')[0]):
+        info = LANG_INFO.get(candidate, {})
+        info = LANG_INFO.get(info['fallback'][0], {}) if 'fallback' in info else info
+        if 'name_local' in info:
+            return info['code'], info['name_local']
+    raise ScaffoldError(f'{code!r} is not a language of Django: pass a code such as ru, de or pt-br')
+
+
+def languages(code: str) -> list[list[str]]:
+    """
+    The LANGUAGES of a product in a language: that language, then English, the language of
+    the msgids, which every product has.
+    """
+    result = [list(product_language(code))]
+    if result[0][0] != 'en':
+        result.append(['en', 'English'])
+    return result
+
+
+def write_files(
+    directory: Path, name: str, frontend: bool = False, language: str = 'en'
+) -> list[Path]:
+    """
+    Writes the skeleton of the project in a `language` (`LANGUAGE_CODE`, with English in
+    `LANGUAGES`), with bazis-front in its requirements and apps when it has a `frontend`
+    (the agent creates the frontend itself with `bazis_front init`). Fails if the directory
+    has files already.
     """
     if directory.exists() and any(directory.iterdir()):
         raise ScaffoldError(f'{directory} is not empty')
@@ -284,6 +340,7 @@ def write_files(directory: Path, name: str, frontend: bool = False) -> list[Path
             f'{name!r} cannot be the project package: it must be an identifier that is not '
             'a keyword, "tests" or the name of an installed module'
         )
+    product_languages = languages(language)
     requirements = [*REQUIREMENTS, *([frontend_requirement()] if frontend else [])]
     installed_apps = [FRONTEND_APP] if frontend else []
     files = {
@@ -295,7 +352,9 @@ def write_files(directory: Path, name: str, frontend: bool = False) -> list[Path
         f'{name}/urls.py': URLS_PY,
         f'{name}/wsgi.py': WSGI_PY.format(name=name),
         'project.env': PROJECT_ENV.format(
-            name=name, installed_apps=json.dumps(installed_apps), templates=json.dumps(TEMPLATES)
+            name=name, installed_apps=json.dumps(installed_apps), templates=json.dumps(TEMPLATES),
+            languages=json.dumps(product_languages, ensure_ascii=False),
+            language=product_languages[0][0],
         ),
         '.env': DOT_ENV.format(name=name, secret_key=secrets.token_urlsafe(48)),
         '.gitignore': GITIGNORE,

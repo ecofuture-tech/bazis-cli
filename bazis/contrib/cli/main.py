@@ -43,14 +43,15 @@ FRONTEND_STEPS = """\
 2. Describe the product in `spec/product.yaml` from {source}: the roles (each with its
    permit role and a `test_user`), the entities with their fields, the workflows of the
    entities with statuses, the access of each role, and scenarios for the main tasks of
-   every role, including what a role may not do. Write the screens the scenarios use in
-   `spec/screens/<id>.yaml`. Run `front_check` and fix the errors of the shape and of the
-   references.
+   every role, including what a role may not do, and the `languages` and `language` of
+   the backend. Write the screens the scenarios use in `spec/screens/<id>.yaml`. Run
+   `front_check` and fix the errors of the shape and of the references.
 3. Make the backend satisfy the specs: the apps, models, route sets and routers; the
    permit roles with the permissions of the access and the statuses and transits of the
    workflows as data migrations; the e2e data command recommended by bazis-front,
-   `e2e_data`, with only the test users and the records the scenarios need; tests;
-   `makemigrations`; `run_doctor` without errors.
+   `e2e_data`, with only the test users and the records the scenarios need; tests; the
+   translations of the backend in each language other than English; `makemigrations`;
+   `run_doctor` without errors.
 4. Migrate the database (`.venv/bin/python manage.py migrate`) and export the contract
    (`.venv/bin/python manage.py bazis_front contract`).
 5. Run `front_check` and fix the spec or the backend as each `hint` says until it reports
@@ -58,7 +59,8 @@ FRONTEND_STEPS = """\
 6. Choose the components with `front_catalog` and copy those the screens need
    (`.venv/bin/python manage.py bazis_front add ...`), then write the screens in
    `frontend/src/screens/<id>/` from their specs, composed from the components, with
-   their routes and navigation in `frontend/src/app/`, as `frontend/AGENTS.md` shows.
+   their routes and navigation in `frontend/src/app/`, as `frontend/AGENTS.md` shows;
+   their texts go through `t()`, in the dictionaries of the product of every language.
 7. Write the design in `spec/design/` (the brand, the colors and the fonts that fit
    {source}) and generate the theme (`.venv/bin/python manage.py bazis_front design`).
 8. Generate the end-to-end tests (`.venv/bin/python manage.py bazis_front e2e`), install
@@ -73,23 +75,51 @@ FRONTEND_STEPS = """\
 """
 
 
-def new_prompt(description: str, name: str, frontend: bool = False) -> str:
+def language_step(language: str | None) -> str:
+    """
+    What the prompt of `bazis new` says about the language of the product: the `language`
+    chosen with `--language`, else the agent finds it from the description.
+    """
+    if language:
+        code, own_name = scaffold.product_language(language)
+        languages = ' and English' if code != 'en' else ''
+        return f"""\
+The product is in {own_name} (`{code}`){languages}: `BS_LANGUAGES` and `BS_LANGUAGE_CODE` of
+`project.env` are set. Follow the rules of the languages."""
+    return """\
+The language of the product is the language of the description, and English is always one
+of its languages (the language of the msgids). `project.env` has English only: if the
+description is not in English, first set there
+`BS_LANGUAGES='[["<code>", "<its own name>"], ["en", "English"]]'` and
+`BS_LANGUAGE_CODE=<code>` with the code of Django of that language (`ru`, `de`, `pt-br`).
+Follow the rules of the languages."""
+
+
+def new_prompt(
+    description: str, name: str, frontend: bool = False, language: str | None = None
+) -> str:
     """
     The task of the agent of `bazis new` (also used by the evals): the backend, and with a
-    `frontend` the whole product with its frontend made by bazis-front.
+    `frontend` the whole product with its frontend made by bazis-front, in the `language`
+    of `--language`, else in the language of the description.
     """
     skeleton = f"""\
 Build this Bazis project: {description}
 
 The skeleton is ready: the project package `{name}` (settings, root router, ASGI app in
-`{name}/main.py`), `project.env`, `.env`, `requirements.txt`, `tests/`, and `.venv` with
-Bazis installed."""
-    if not frontend:
-        return skeleton + f""" Read the guide of the core (`package_guide("bazis")`), choose the
-Bazis packages the project needs with `list_packages`, read their guides, then create the
-apps with their models, routes and tests, and register the routers in `{name}/router.py`.
+`{name}/main.py`), `project.env`, `.env`, `requirements.txt`, `tests/` (its `conftest.py`
+keeps the cache keys of the tests apart), and `.venv` with Bazis installed.
+
+{language_step(language)}
 """
-    return skeleton + f""" bazis-front is in `requirements.txt` and `BS_INSTALLED_APPS`.
+    if not frontend:
+        return skeleton + f"""
+Read the guide of the core (`package_guide("bazis")`), choose the Bazis packages the
+project needs with `list_packages`, read their guides, then create the apps with their
+models, routes, translations and tests, and register the routers in `{name}/router.py`.
+"""
+    return skeleton + f"""
+bazis-front is in `requirements.txt` and `BS_INSTALLED_APPS`.
 
 Build the whole product, the backend and its frontend, in this order; register the
 routers of the apps in `{name}/router.py`.
@@ -101,11 +131,12 @@ def new_task(args) -> agent.Task:
     directory = args.directory.resolve()
     name = args.name or scaffold.package_name(directory)
     frontend = not args.no_frontend
+    language = scaffold.product_language(args.language)[0] if args.language else None
     if frontend and (problem := scaffold.node_problem()):
         raise scaffold.ScaffoldError(
             f'{problem}. Install it, or pass --no-frontend to build only the backend.'
         )
-    scaffold.write_files(directory, name, frontend=frontend)
+    scaffold.write_files(directory, name, frontend=frontend, language=language or 'en')
     print(f'Created the project {name} in {directory}')
     if not args.no_venv:
         print('Installing the dependencies into .venv ...')
@@ -116,7 +147,7 @@ def new_task(args) -> agent.Task:
                 f'{err}\nThe files of the project are written: create .venv and install '
                 f'requirements-dev.txt by hand, or delete {directory} and run bazis new again.'
             ) from err
-    prompt = new_prompt(args.description, name, frontend)
+    prompt = new_prompt(args.description, name, frontend, language)
     return _task(args, prompt, directory, frontend=frontend)
 
 
@@ -252,6 +283,11 @@ def parser() -> argparse.ArgumentParser:
     new.add_argument('directory', type=Path, help='A new or empty directory.')
     new.add_argument('description', help='What the project does, in your words.')
     new.add_argument('--name', help='The project package (default: from the directory name).')
+    new.add_argument(
+        '--language',
+        help='The language of the product, a code such as ru, de or pt-br; English is always '
+        'one of its languages (default: the language of the description).',
+    )
     new.add_argument('--no-venv', action='store_true', help='Do not create .venv.')
     new.add_argument(
         '--no-frontend', action='store_true',
