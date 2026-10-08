@@ -210,7 +210,9 @@ FastAPI and Pydantic.
   never flush it, their cache keys have a prefix of their own (`tests/conftest.py`).
 - The languages are `BS_LANGUAGES` and `BS_LANGUAGE_CODE` (`project.env`), English always
   among them: the texts of the code are English msgids (`gettext_lazy`), translated in
-  `locale/<language>/LC_MESSAGES/django.po` and compiled (`compilemessages`).
+  `locale/<language>/LC_MESSAGES/django.po` and compiled (`compilemessages`). Keep
+  `locale/`, even empty: `makemessages` writes into the first directory of `LOCALE_PATHS`,
+  which without it is the catalog of a package.
 '''
 
 AGENTS_MD_FRONTEND = '''
@@ -363,6 +365,9 @@ def write_files(
         'pytest.ini': PYTEST_INI.format(name=name),
         'tests/__init__.py': '',
         'tests/conftest.py': CONFTEST_PY.format(name=name),
+        # the catalogs of the project: the first of LOCALE_PATHS (the core lists it only when
+        # it exists), where `makemessages` writes; without it, into the catalog of a package
+        'locale/.gitkeep': '',
         '.mcp.json': json.dumps(
             {'mcpServers': {'bazis': {'command': f'{VENV_BIN}/bazis-mcp{EXE}', 'args': []}}},
             indent=2,

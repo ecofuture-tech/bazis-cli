@@ -8,7 +8,7 @@ Bazis. It is a tool for the developer's machine, not a dependency of a project.
 
 - `bazis new DIR "what the product does"` writes the skeleton of a project (package with
   settings, root router and ASGI app, `project.env`, `.env` with a generated secret key,
-  `requirements*.txt`, `tests/`, `.mcp.json`, `AGENTS.md`), creates `.venv` with Bazis and
+  `requirements*.txt`, `tests/`, `locale/`, `.mcp.json`, `AGENTS.md`), creates `.venv` with Bazis and
   bazis-mcp (`--no-venv` skips it), then the agent chooses the Bazis packages and builds the
   apps, migrations and tests. By default the product also gets its frontend: bazis-front
   is in `requirements.txt` and `BS_INSTALLED_APPS`, and the agent follows the order of the

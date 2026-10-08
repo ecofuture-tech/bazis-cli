@@ -15,6 +15,7 @@
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -92,19 +93,26 @@ def environment(monkeypatch):
     monkeypatch.delenv(scaffold.FRONTEND_REQUIREMENT_ENV, raising=False)
 
 
-def doctor(directory: Path) -> list:
+def manage(directory: Path, *args: str) -> subprocess.CompletedProcess:
     """
-    The messages of `bazis_doctor` of a project: its own settings only, but the libraries
-    of this machine (GDAL, GEOS).
+    Runs `manage.py` of a project with its own settings only, but the libraries of this
+    machine (GDAL, GEOS).
     """
     env = {
         k: v for k, v in os.environ.items()
         if not k.startswith(('BS_', 'DJANGO_')) or k.endswith('_LIBRARY_PATH')
     }
-    done = subprocess.run(
-        [sys.executable, 'manage.py', 'bazis_doctor', '--json'],
+    return subprocess.run(
+        [sys.executable, 'manage.py', *args],
         cwd=directory, env=env, capture_output=True, text=True, timeout=300,
     )
+
+
+def doctor(directory: Path) -> list:
+    """
+    The messages of `bazis_doctor` of a project.
+    """
+    done = manage(directory, 'bazis_doctor', '--json')
     assert done.returncode == 0, done.stderr[-3000:]
     return json.loads(done.stdout)
 
@@ -156,6 +164,33 @@ def test_scaffold_in_a_language(tmp_path):
     scaffold.write_files(english, 'shop')
     env = (english / 'project.env').read_text(encoding='utf-8')
     assert """BS_LANGUAGES='[["en", "English"]]'""" in env and 'BS_LANGUAGE_CODE=en\n' in env
+
+
+def test_makemessages_writes_into_the_catalog_of_the_project(tmp_path):
+    """
+    The skeleton has `locale/`, the first of LOCALE_PATHS, where `makemessages` writes the
+    msgids of the project; without it, the first is the catalog of an installed package.
+    """
+    if shutil.which('xgettext') is None:
+        pytest.skip('gettext is not installed')
+    directory = tmp_path / 'shop'
+    scaffold.write_files(directory, 'shop', language='ru')
+    assert (directory / 'locale' / '.gitkeep').is_file()
+
+    # checked before makemessages, which would otherwise change an installed package
+    done = manage(
+        directory, 'shell', '-c', 'from django.conf import settings; print(settings.LOCALE_PATHS[0])'
+    )
+    assert done.returncode == 0, done.stderr[-3000:]
+    assert os.path.realpath(done.stdout.split()[-1]) == os.path.realpath(directory / 'locale')
+
+    (directory / 'shop' / 'texts.py').write_text(
+        "from django.utils.translation import gettext_lazy as _\n\nTITLE = _('A text of the shop')\n"
+    )
+    done = manage(directory, 'makemessages', '-l', 'ru')
+    assert done.returncode == 0, done.stderr[-3000:]
+    catalog = directory / 'locale' / 'ru' / 'LC_MESSAGES' / 'django.po'
+    assert 'msgid "A text of the shop"' in catalog.read_text(encoding='utf-8')
 
 
 def test_tests_of_a_scaffold_keep_their_cache_keys_apart(tmp_path):

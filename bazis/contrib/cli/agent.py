@@ -96,13 +96,12 @@ English, the language of the msgids, is always one of them.
   f-string of them). No text in another language in the code; the data migrations set the
   names of the roles, statuses and transits in the column of each language.
 - Translate them into every other language in the catalog of the project,
-  `locale/<language>/LC_MESSAGES/django.po`: create `locale/` first (otherwise the
-  messages go to a catalog of a package), run `.venv/bin/python manage.py makemessages
-  -l <language> --ignore frontend --ignore static --ignore media`, fill every msgstr, then
-  compile only the catalogs of the project with `.venv/bin/django-admin compilemessages
-  -l <language> --ignore .venv --ignore frontend` (without the settings: `manage.py`
-  would also compile the catalogs of the packages in `.venv`); keep the `.po` and the
-  `.mo` files.
+  `locale/<language>/LC_MESSAGES/django.po` (the directory `locale/` stays, even empty):
+  run `.venv/bin/python manage.py makemessages -l <language> --ignore frontend --ignore
+  static --ignore media`, fill every msgstr, then compile only the catalogs of the project
+  with `.venv/bin/django-admin compilemessages -l <language> --ignore .venv --ignore
+  frontend` (without the settings: `manage.py` would also compile the catalogs of the
+  packages in `.venv`); keep the `.po` and the `.mo` files.
 - `run_doctor` must report no `bazis.W004` (two catalogs translate a msgid differently)
   and no `bazis.W005` (a language without the translations of the texts of a Bazis
   package: translate those msgids in the catalog of the project, and add them again after
