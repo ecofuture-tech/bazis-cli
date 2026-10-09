@@ -13,7 +13,7 @@ local_scheme = "no-local-version"
 
 [project]
 name = "bazis-cli"
-description = "The bazis command: creates, extends and audits Bazis projects with Claude (Claude Agent SDK)."
+description = "The bazis command: creates, extends and audits Bazis products, backend and frontend, with Claude (Claude Agent SDK)."
 keywords = ["bazis", "django", "fastapi", "pydantic", "framework", "jsonapi", "cli", "ai", "agents", "claude"]
 urls = { Home = "https://github.com/ecofuture-tech/bazis-cli" }
 authors = [{name = "Ilya Kharyn", email = "ilya.tt07@gmail.com"}]
@@ -34,7 +34,7 @@ classifiers = [
     "Framework :: FastAPI",
 ]
 dependencies = [
-    "bazis-mcp>=2.4.1",
+    "bazis-mcp>=2.4.5",
     "claude-agent-sdk>=0.2.163",
 ]
 

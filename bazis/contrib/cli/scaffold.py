@@ -14,12 +14,14 @@
 
 """
 The skeleton of a new Bazis project: the files every project has, written without the
-model, and its virtual environment. The agent then adds the apps the project needs.
+model, and its virtual environment. The agent then adds the apps the project needs and,
+with bazis-front, its frontend.
 """
 
 import importlib.util
 import json
 import keyword
+import os
 import re
 import secrets
 import shutil
@@ -28,9 +30,21 @@ import sys
 from pathlib import Path
 
 
-#: the packages of every project; the agent adds the Bazis packages the project needs
-REQUIREMENTS = ['bazis>=2.4.1']
-REQUIREMENTS_DEV = ['bazis-mcp>=2.4.1', 'bazis-test-utils>=2.4.0']
+#: the packages of every project; the agent adds the Bazis packages the project needs. The
+#: minimums are the latest releases, not older than those of the catalog of bazis-mcp
+#: (tests/test_cli.py compares them), so that the guides describe the installed versions
+REQUIREMENTS = ['bazis>=2.15.0']
+REQUIREMENTS_DEV = ['bazis-mcp>=2.4.5', 'bazis-test-utils>=2.5.1']
+
+#: the frontend layer of a product (`bazis new` without `--no-frontend`)
+FRONTEND_REQUIREMENT = 'bazis-front>=0.1.0'
+FRONTEND_APP = 'bazis.contrib.front'
+#: replaces FRONTEND_REQUIREMENT in requirements.txt: a pip requirement such as a path to a
+#: wheel or a checkout, or `bazis-front @ <url>`, to try a bazis-front that is not on PyPI
+FRONTEND_REQUIREMENT_ENV = 'BAZIS_FRONT_REQUIREMENT'
+#: the oldest Node.js of the frontend: `engines.node` of the template of bazis-front, which
+#: is a dependency of the project, not of the CLI (tests/test_cli.py compares them)
+NODE_VERSION = (22, 12)
 
 
 MANAGE_PY = '''#!/usr/bin/env python
@@ -113,12 +127,13 @@ TEMPLATES = [
 ]
 
 PROJECT_ENV = '''# Settings of the project shared by all environments (secrets go to .env)
-BS_INSTALLED_APPS='[]'
+BS_INSTALLED_APPS='{installed_apps}'
 BS_ROOT_URLCONF={name}.urls
 BS_BAZIS_ROUTER_MODULE={name}.router
 BS_WSGI_APPLICATION={name}.wsgi.application
 BS_DEFAULT_AUTO_FIELD=django.db.models.BigAutoField
-BS_LANGUAGE_CODE=en
+BS_LANGUAGES='{languages}'
+BS_LANGUAGE_CODE={language}
 BS_TEMPLATES='{templates}'
 '''
 
@@ -135,6 +150,7 @@ BS_CACHES__DEFAULT__LOCATION=redis://localhost:6379/0
 
 GITIGNORE = '''.env
 .venv/
+.scratch/
 __pycache__/
 *.pyc
 .pytest_cache/
@@ -146,7 +162,35 @@ PYTEST_INI = '''[pytest]
 DJANGO_SETTINGS_MODULE = {name}.settings
 '''
 
-CONFTEST_PY = '''import pytest
+CONFTEST_PY = '''"""
+The fixtures of the tests. The pytest plugin of bazis-test-utils installs the triggers of
+pgtrigger in the test database, and `migrate` applies the roles and the workflows declared
+in `<app>/roles.py` and `<app>/workflow.py`, also again after the flush of a test with
+`transaction=True`: no fixture installs the triggers or creates the roles, statuses or
+transits. A test that changes the declared rows itself takes the fixture `bazis_declared`.
+"""
+
+import uuid
+
+import pytest
+from django.test import override_settings
+
+
+@pytest.fixture(scope='session', autouse=True)
+def cache_of_the_tests():
+    """
+    The tests share Redis (BS_CACHES__DEFAULT__LOCATION) with the backend and the other
+    projects that use it: their cache keys have a prefix of their own, new at every run, and
+    only those keys are deleted. Never flush the Redis database or call cache.clear().
+    """
+    from django.conf import settings
+    from django.core.cache import cache
+
+    default = {{**settings.CACHES['default'], 'KEY_PREFIX': f'{name}-tests-{{uuid.uuid4().hex[:8]}}'}}
+    # the cache connections of all the threads, also of the endpoints, are made again
+    with override_settings(CACHES={{**settings.CACHES, 'default': default}}):
+        yield
+        cache.delete_pattern('*')
 
 
 @pytest.fixture
@@ -172,9 +216,107 @@ FastAPI and Pydantic.
 - The MCP server `bazis` (`.mcp.json`) gives the catalog and the guides of the Bazis
   packages and the facts and checks of this project. Read the guide of a package before
   using it, and run `python manage.py bazis_doctor` and the tests after every change.
+- Temporary files (scripts, outputs, screenshots) go to `.scratch/` (ignored by Git), not
+  to `/tmp`.
 - PostgreSQL with PostGIS and Redis are required to run the project and the tests
-  (`.env`); the checks and `makemigrations` work without them.
+  (`.env`); the checks and `makemigrations` work without them. The tests share Redis: they
+  never flush it, their cache keys have a prefix of their own (`tests/conftest.py`).
+- The languages are `BS_LANGUAGES` and `BS_LANGUAGE_CODE` (`project.env`), English always
+  among them: the texts of the code are English msgids (`gettext_lazy`), translated in
+  the catalogs of the project, `locale/<language>/LC_MESSAGES/django.po`, by `python
+  manage.py bazis_messages`: `make`, the translations of what it lists as untranslated or
+  fuzzy in `locale/translations.json` (kept), `apply locale/translations.json --check`.
+  A msgid of the Bazis packages that the project translates itself (`bazis.W004`) is
+  declared with `gettext_noop` in `{name}/translations.py`. Never edit the `.po` files with
+  a script, never run `makemessages` yourself.
 '''
+
+AGENTS_MD_FRONTEND = '''
+## Frontend
+
+The product has a frontend made by [bazis-front](https://github.com/ecofuture-tech/bazis-front)
+(`package_guide("bazis-front")` of the MCP server): the specs of the product in `spec/`,
+the contract generated from the backend in `contract/`, the React app in `frontend/` (its
+guide is `frontend/AGENTS.md`). Node.js 22.12 or newer with npm is needed for the frontend.
+
+- The backend is built to satisfy the specs. After every change of the models, routes,
+  roles, statuses or transits: migrate, `python manage.py bazis_front contract`, then
+  `python manage.py bazis_front check` (the MCP tool `front_check`) until it has no errors.
+- `contract/`, `frontend/src/bazis/generated/` and `frontend/e2e/generated/` are only
+  generated (`bazis_front contract`, `design`, `e2e`), never edited; the MCP tool
+  `front_status` says what is stale.
+- The permit roles are declared in `<app>/roles.py` and the statuses and transits in
+  `<app>/workflow.py`: `migrate` applies them. The test data of the end-to-end tests is `python manage.py e2e_data` (the e2e data command recommended by
+  bazis-front): the test users of the roles of the specs, with the password of
+  `E2E_PASSWORD`, and the records the scenarios need.
+- In `frontend/`: `npx tsc --noEmit`, `npm run lint`, `npm test`, and `npm run e2e` against
+  the running backend with that test data.
+'''
+
+
+#: run by the Python of a project in its directory (`create_database`): creates the database
+#: of its settings (`.env`, the `BS_*` variables of the environment) when it is missing, with
+#: PostGIS for the PostGIS backend, and prints the outcome as a JSON object: `outcome`
+#: (`created`, `exists`, `has_data`: tables of another project, `uninspected`: it exists but
+#: could not be opened, `unreachable`, `failed`, `other`: not PostgreSQL), `detail` (the error) and `postgis` (the error of the extension)
+CREATE_DATABASE_PY = """\
+import json
+import os
+import sys
+
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', sys.argv[1] + '.settings')
+
+from django.conf import settings
+
+db = settings.DATABASES['default']
+result = {'name': db['NAME'], 'server': f"{db['HOST'] or 'localhost'}:{db['PORT'] or 5432}"}
+backend = db['ENGINE'].rsplit('.', 1)[-1]
+if backend not in ('postgresql', 'postgis'):
+    result['outcome'] = 'other'
+else:
+    import psycopg
+    from psycopg import sql
+
+    params = dict(host=db['HOST'], port=db['PORT'], user=db['USER'], password=db['PASSWORD'])
+    params = {k: v for k, v in params.items() if v}
+    try:
+        server = psycopg.connect(dbname='postgres', autocommit=True, connect_timeout=5, **params)
+    except psycopg.Error as err:
+        result.update(outcome='unreachable', detail=' '.join(str(err).split()))
+    else:
+        try:
+            with server:
+                query = 'SELECT 1 FROM pg_database WHERE datname = %s'
+                exists = server.execute(query, [db['NAME']]).fetchone() is not None
+                if not exists:
+                    server.execute(sql.SQL('CREATE DATABASE {}').format(sql.Identifier(db['NAME'])))
+            result['outcome'] = 'exists' if exists else 'created'
+            with psycopg.connect(
+                dbname=db['NAME'], autocommit=True, connect_timeout=5, **params
+            ) as database:
+                # a table of the public schema that no extension (PostGIS) owns: data
+                query = (
+                    "SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+                    "WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') AND NOT EXISTS "
+                    "(SELECT 1 FROM pg_depend d WHERE d.objid = c.oid AND d.deptype = 'e') "
+                    "LIMIT 1"
+                )
+                if exists and database.execute(query).fetchone():
+                    result['outcome'] = 'has_data'
+                elif backend == 'postgis':
+                    try:
+                        database.execute('CREATE EXTENSION IF NOT EXISTS postgis')
+                    except psycopg.Error as err:
+                        result['postgis'] = ' '.join(str(err).split())
+        except psycopg.Error as err:
+            if result.get('outcome') == 'exists':
+                result.update(outcome='uninspected', detail=' '.join(str(err).split()))
+            elif 'outcome' in result:
+                result['detail'] = ' '.join(str(err).split())
+            else:
+                result.update(outcome='failed', detail=' '.join(str(err).split()))
+print(json.dumps(result))
+"""
 
 
 class ScaffoldError(Exception):
@@ -203,9 +345,76 @@ def valid_package_name(name: str) -> bool:
     )
 
 
-def write_files(directory: Path, name: str) -> list[Path]:
+def frontend_requirement() -> str:
     """
-    Writes the skeleton of the project. Fails if the directory has files already.
+    The requirement of bazis-front in requirements.txt (FRONTEND_REQUIREMENT_ENV overrides it).
+    """
+    return os.environ.get(FRONTEND_REQUIREMENT_ENV, '').strip() or FRONTEND_REQUIREMENT
+
+
+def node_problem(run=subprocess.run) -> str | None:
+    """
+    Why the frontend cannot be built on this machine (Node.js or npm are missing, or Node.js
+    is older than NODE_VERSION), or None.
+    """
+    need = '.'.join(map(str, NODE_VERSION))
+    missing = [tool for tool in ('node', 'npm') if shutil.which(tool) is None]
+    if missing:
+        return (
+            f'{" and ".join(missing)} not found: the frontend needs Node.js {need} or newer '
+            'with npm (https://nodejs.org)'
+        )
+    try:
+        found = run([shutil.which('node'), '--version'], capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError) as err:
+        return f'`node --version` failed ({err}): the frontend needs Node.js {need} or newer'
+    version = re.match(r'v?(\d+)\.(\d+)', found.stdout.strip())
+    if found.returncode or not version:
+        return f'`node --version` failed: the frontend needs Node.js {need} or newer'
+    if tuple(map(int, version.groups())) < NODE_VERSION:
+        return (
+            f'Node.js {found.stdout.strip()} is too old: the frontend needs Node.js {need} or '
+            'newer (https://nodejs.org)'
+        )
+    return None
+
+
+def product_language(code: str) -> tuple[str, str]:
+    """
+    The language of a product, as a code of Django and its own name, from a code such as
+    `ru`, `ru-RU`, `RU` or `pt_BR` (matched by itself, else by its base code, as the core
+    matches the language of a request).
+    """
+    from django.conf.locale import LANG_INFO
+
+    wanted = code.strip().lower().replace('_', '-')
+    for candidate in (wanted, wanted.split('-')[0]):
+        info = LANG_INFO.get(candidate, {})
+        info = LANG_INFO.get(info['fallback'][0], {}) if 'fallback' in info else info
+        if 'name_local' in info:
+            return info['code'], info['name_local']
+    raise ScaffoldError(f'{code!r} is not a language of Django: pass a code such as ru, de or pt-br')
+
+
+def languages(code: str) -> list[list[str]]:
+    """
+    The LANGUAGES of a product in a language: that language, then English, the language of
+    the msgids, which every product has.
+    """
+    result = [list(product_language(code))]
+    if result[0][0] != 'en':
+        result.append(['en', 'English'])
+    return result
+
+
+def write_files(
+    directory: Path, name: str, frontend: bool = False, language: str = 'en'
+) -> list[Path]:
+    """
+    Writes the skeleton of the project in a `language` (`LANGUAGE_CODE`, with English in
+    `LANGUAGES`), with bazis-front in its requirements and apps when it has a `frontend`
+    (the agent creates the frontend itself with `bazis_front init`). Fails if the directory
+    has files already.
     """
     if directory.exists() and any(directory.iterdir()):
         raise ScaffoldError(f'{directory} is not empty')
@@ -214,6 +423,9 @@ def write_files(directory: Path, name: str) -> list[Path]:
             f'{name!r} cannot be the project package: it must be an identifier that is not '
             'a keyword, "tests" or the name of an installed module'
         )
+    product_languages = languages(language)
+    requirements = [*REQUIREMENTS, *([frontend_requirement()] if frontend else [])]
+    installed_apps = [FRONTEND_APP] if frontend else []
     files = {
         'manage.py': MANAGE_PY.format(name=name),
         f'{name}/__init__.py': '',
@@ -222,10 +434,14 @@ def write_files(directory: Path, name: str) -> list[Path]:
         f'{name}/router.py': ROUTER_PY,
         f'{name}/urls.py': URLS_PY,
         f'{name}/wsgi.py': WSGI_PY.format(name=name),
-        'project.env': PROJECT_ENV.format(name=name, templates=json.dumps(TEMPLATES)),
+        'project.env': PROJECT_ENV.format(
+            name=name, installed_apps=json.dumps(installed_apps), templates=json.dumps(TEMPLATES),
+            languages=json.dumps(product_languages, ensure_ascii=False),
+            language=product_languages[0][0],
+        ),
         '.env': DOT_ENV.format(name=name, secret_key=secrets.token_urlsafe(48)),
         '.gitignore': GITIGNORE,
-        'requirements.txt': '\n'.join(REQUIREMENTS) + '\n',
+        'requirements.txt': '\n'.join(requirements) + '\n',
         'requirements-dev.txt': '-r requirements.txt\n' + '\n'.join(REQUIREMENTS_DEV) + '\n',
         'pytest.ini': PYTEST_INI.format(name=name),
         'tests/__init__.py': '',
@@ -234,7 +450,7 @@ def write_files(directory: Path, name: str) -> list[Path]:
             {'mcpServers': {'bazis': {'command': f'{VENV_BIN}/bazis-mcp{EXE}', 'args': []}}},
             indent=2,
         ) + '\n',
-        'AGENTS.md': AGENTS_MD.format(name=name),
+        'AGENTS.md': AGENTS_MD.format(name=name) + (AGENTS_MD_FRONTEND if frontend else ''),
     }
     written = []
     for relative, content in files.items():
@@ -255,10 +471,17 @@ def create_venv(directory: Path, run=subprocess.run) -> Path:
     python = venv / ('Scripts/python.exe' if sys.platform == 'win32' else 'bin/python')
     uv = shutil.which('uv')
     if uv:
+        # a bazis-front from FRONTEND_REQUIREMENT_ENV, such as a checkout, is built again:
+        # uv keeps the build of a directory until its pyproject.toml changes, so it would
+        # install an older commit (pip builds a directory at every install)
+        refresh = (
+            ['--refresh-package', 'bazis-front']
+            if frontend_requirement() != FRONTEND_REQUIREMENT else []
+        )
         commands = [
             # --seed installs pip, which the agent uses to add packages
             [uv, 'venv', '--quiet', '--seed', '--python', sys.executable, str(venv)],
-            [uv, 'pip', 'install', '--quiet', '--python', str(python),
+            [uv, 'pip', 'install', '--quiet', *refresh, '--python', str(python),
              '-r', str(directory / 'requirements-dev.txt')],
         ]
     else:
@@ -272,3 +495,60 @@ def create_venv(directory: Path, run=subprocess.run) -> Path:
         if done.returncode:
             raise ScaffoldError(f'{" ".join(command)} failed:\n{done.stderr.strip()[-2000:]}')
     return python
+
+
+def create_database(directory: Path, name: str, python: Path | str = sys.executable,
+                    run=subprocess.run) -> str:
+    """
+    Creates the database of the project `name` as its settings say (`.env`, the `BS_*`
+    variables of the environment) when PostgreSQL is reachable and the database is
+    missing, with the extension PostGIS for the PostGIS backend (the default). `python`
+    runs the settings of the project: that of its `.venv`. Never fails: returns what was
+    done, or why nothing was, for the user and the agent.
+    """
+    not_created = 'The database of the project was not created'
+    try:
+        done = run(
+            [str(python), '-c', CREATE_DATABASE_PY, name],
+            cwd=directory.resolve(), capture_output=True, text=True, timeout=120,
+        )
+    except (OSError, subprocess.SubprocessError) as err:
+        return f'{not_created}: {err}'
+    try:
+        result = json.loads(done.stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        error = done.stderr.strip().splitlines()
+        return f'{not_created}: {error[-1] if error else "its script printed nothing"}'
+    database, server = f'`{result["name"]}`', f'PostgreSQL {result["server"]}'
+    if result.get('postgis'):
+        state = f', but PostGIS is not installed in it: {result["postgis"]}'
+    elif result.get('detail'):
+        state = f', but it could not be opened: {result["detail"]}'
+    else:
+        state = '.'
+    match result['outcome']:
+        case 'created':
+            return f'Created the database {database} on {server}{state}'
+        case 'exists':
+            return f'The database {database} exists on {server} without tables{state}'
+        case 'uninspected':
+            return (
+                f'The database {database} exists on {server} but could not be inspected: '
+                f'{result["detail"]}. It is not ready for this project: check the access to it, '
+                'or set another `BS_DATABASES__DEFAULT__NAME` in `.env`.'
+            )
+        case 'has_data':
+            return (
+                f'The database {database} on {server} already has data, probably of another '
+                'project: it is not the database of this project. Set '
+                '`BS_DATABASES__DEFAULT__NAME` in `.env` to a new name before migrating.'
+            )
+        case 'unreachable':
+            return (
+                f'{server} cannot be reached ({result["detail"]}): the database {database} '
+                'is not created.'
+            )
+        case 'failed':
+            return f'The database {database} was not created on {server}: {result["detail"]}'
+        case _:
+            return f'The database {database} is not on PostgreSQL: it is not created.'

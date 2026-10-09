@@ -17,15 +17,25 @@ The grader of the evals: deterministic checks of a project built by the agent, r
 Python of the project (`.venv`) against PostgreSQL and Redis of `.env`. It does not depend
 on the names the agent chose: it checks that the project loads and passes its checks, has
 the expected Bazis packages, complete migrations that apply, models and routes of its own,
-and tests that pass.
+and tests that pass. A product with a frontend (`frontend = true`) also needs specs valid
+against a fresh contract, generated files that are not stale, a frontend that builds and
+passes its lint and component tests, and end-to-end tests of its scenarios that pass
+against the backend with the test data of `manage.py e2e_data` (Node.js is needed). A task
+with a `language` needs the product in that language and in English, with its catalog.
+The grader runs on POSIX only (macOS, Linux): it stops the servers and the commands it
+starts by their process group.
 """
 
 import json
 import os
 import re
+import secrets
 import shutil
+import signal
+import socket
 import subprocess
 import sys
+import time
 import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -54,11 +64,48 @@ def python_of(project: Path) -> str:
     return sys.executable
 
 
+def execute(command: list[str], cwd: Path, env: dict) -> subprocess.CompletedProcess:
+    """
+    Runs a command in a process group of its own. A command that takes longer than TIMEOUT
+    fails (return code 124) and its whole group is killed, so that no dev server or browser
+    it started stays alive and the other checks still run.
+    """
+    try:
+        process = subprocess.Popen(
+            command, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            stdin=subprocess.DEVNULL, text=True, start_new_session=True,
+        )
+    except FileNotFoundError:
+        return subprocess.CompletedProcess(command, 127, '', f'{command[0]} not found')
+    try:
+        stdout, stderr = process.communicate(timeout=TIMEOUT)
+    except subprocess.TimeoutExpired:
+        stop(process, kill=True)
+        stdout, stderr = process.communicate()
+        return subprocess.CompletedProcess(
+            command, 124, stdout, f'{stderr}\ntimed out after {TIMEOUT} seconds',
+        )
+    return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+
+
+def stop(process: subprocess.Popen, kill: bool = False) -> None:
+    """
+    Stops a process started in a session of its own with the processes it started (also
+    when it has exited and they have not).
+    """
+    try:
+        os.killpg(process.pid, signal.SIGKILL if kill else signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    try:
+        process.wait(timeout=30)
+    except subprocess.TimeoutExpired:
+        if not kill:
+            stop(process, kill=True)
+
+
 def run(project: Path, args: list[str], env: dict) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        [python_of(project), *args], cwd=project, env=env, capture_output=True, text=True,
-        timeout=TIMEOUT, stdin=subprocess.DEVNULL,
-    )
+    return execute([python_of(project), *args], project, env)
 
 
 def json_in(text: str):
@@ -119,6 +166,9 @@ def grade(project: Path, task: dict) -> list[Check]:
     missing = sorted(set(task.get('expected_packages', [])) - installed)
     checks.append(Check('expected Bazis packages', not missing, 'missing: ' + ', '.join(missing) if missing else ''))
 
+    if task.get('language'):
+        checks.append(language_check(project, info, task['language'], env))
+
     apps = local_apps(project)
     models = [m['model'] for m in info.get('models', []) if m['model'].split('.')[0] in apps]
     checks.append(Check(
@@ -137,20 +187,28 @@ def grade(project: Path, task: dict) -> list[Check]:
     migrations = run(project, ['manage.py', 'makemigrations', '--check', '--dry-run'], env)
     checks.append(Check('migrations complete', migrations.returncode == 0, tail(migrations, 6)))
 
+    if task.get('frontend'):
+        checks += frontend_checks(project, env, task.get('min_scenarios', 1))
     if shutil.which('createdb'):
         created = subprocess.run(
             ['createdb', '-h', 'localhost', '-U', 'postgres', database],
             env={**env, 'PGPASSWORD': 'postgres'}, capture_output=True, text=True,
         )
-        migrate = run(project, ['manage.py', 'migrate', '--noinput'], env)
-        checks.append(Check(
-            'migrations apply', created.returncode == 0 and migrate.returncode == 0,
-            created.stderr.strip() or tail(migrate, 6),
-        ))
-        subprocess.run(
-            ['dropdb', '-h', 'localhost', '-U', 'postgres', '--if-exists', database],
-            env={**env, 'PGPASSWORD': 'postgres'}, capture_output=True,
-        )
+        try:
+            migrate = run(project, ['manage.py', 'migrate', '--noinput'], env)
+            migrated = created.returncode == 0 and migrate.returncode == 0
+            checks.append(Check(
+                'migrations apply', migrated, created.stderr.strip() or tail(migrate, 6),
+            ))
+            if task.get('frontend'):
+                checks += frontend_database_checks(project, env, migrated)
+        finally:
+            subprocess.run(
+                ['dropdb', '-h', 'localhost', '-U', 'postgres', '--if-exists', '--force', database],
+                env={**env, 'PGPASSWORD': 'postgres'}, capture_output=True,
+            )
+    elif task.get('frontend'):
+        checks += frontend_database_checks(project, env, False, 'no PostgreSQL (createdb)')
 
     collected = run(project, ['-m', 'pytest', '--collect-only', '-q', '-p', 'no:cacheprovider'], env)
     count = re.search(r'(\d+) tests? collected', collected.stdout)
@@ -162,6 +220,185 @@ def grade(project: Path, task: dict) -> list[Check]:
     else:
         checks.append(Check('tests pass', False, 'no tests'))
     return checks
+
+
+def language_check(project: Path, info: dict, language: str, env: dict) -> Check:
+    """
+    The product is in the language of its description and in English (`LANGUAGES`), the
+    first by default (`LANGUAGE_CODE`), with the catalog of the project compiled and
+    complete: nothing untranslated or fuzzy (`bazis_messages status --check`).
+    """
+    settings = {s['name']: s.get('value') for s in info.get('settings', [])}
+    codes = [code for code, _name in settings.get('LANGUAGES') or []]
+    problems = []
+    if settings.get('LANGUAGE_CODE') != language:
+        problems.append(f'LANGUAGE_CODE is {settings.get("LANGUAGE_CODE")!r}')
+    if not {language, 'en'} <= set(codes):
+        problems.append(f'LANGUAGES are {codes}')
+    catalog = f'locale/{language}/LC_MESSAGES/django.mo'
+    if not [*project.glob(catalog), *project.glob(f'*/{catalog}')]:
+        problems.append(f'no {catalog}')
+    status = run(project, ['manage.py', 'bazis_messages', 'status', '--check'], env)
+    if status.returncode != 0:
+        incomplete = {
+            code: len(it['untranslated']) + len(it['fuzzy'])
+            for code, it in (json_in(status.stdout) or {}).items()
+            if it['untranslated'] or it['fuzzy']
+        }
+        problems.append(
+            'catalogs incomplete: ' + ', '.join(f'{code} {count}' for code, count in incomplete.items())
+            if incomplete else f'bazis_messages status failed: {tail(status, 3)}'
+        )
+    return Check(f'product in {language} and en', not problems, '; '.join(problems))
+
+
+def npm(frontend: Path, args: list[str], env: dict) -> subprocess.CompletedProcess:
+    return execute([shutil.which('npm') or 'npm', *args], frontend, env)
+
+
+def frontend_checks(project: Path, env: dict, min_scenarios: int) -> list[Check]:
+    """
+    The checks of the frontend that need no database: the specs against the contract of
+    the project, the generated files, the build, the lint and the component tests.
+    """
+    frontend = project / 'frontend'
+    if not (frontend / 'bazis-front.lock.json').is_file():
+        return [Check('frontend created', False, 'no frontend/bazis-front.lock.json')]
+    checks = [Check('frontend created', True)]
+
+    spec = run(project, ['manage.py', 'bazis_front', 'check', '--json'], env)
+    result = json_in(spec.stdout)
+    if result is None:
+        checks.append(Check('specs valid against the contract', False, tail(spec)))
+    else:
+        errors = [f'{i["code"]} {i["file"]}#{i["path"]}' for i in result['issues'] if i['severity'] == 'error']
+        checks.append(Check(
+            'specs valid against the contract', result['contract'] and not errors,
+            '; '.join(errors) if result['contract'] else 'no contract/contract.json',
+        ))
+
+    scenarios = sorted(p.stem for p in (frontend / 'e2e' / 'generated').glob('*.spec.ts'))
+    checks.append(Check(
+        f'at least {min_scenarios} scenarios', len(scenarios) >= min_scenarios, ', '.join(scenarios),
+    ))
+    stale = [
+        done for done in (
+            run(project, ['manage.py', 'bazis_front', command, '--check'], env)
+            for command in ('design', 'e2e')
+        ) if done.returncode
+    ]
+    checks.append(Check(
+        'theme and end-to-end tests generated', not stale, '\n'.join(tail(d, 4) for d in stale),
+    ))
+
+    build = npm(frontend, ['run', 'build'], env)
+    checks.append(Check('frontend builds', build.returncode == 0, tail(build, 8)))
+    failed = next(
+        (done for done in (npm(frontend, ['run', 'lint'], env), npm(frontend, ['test'], env))
+         if done.returncode),
+        None,
+    )
+    checks.append(Check(
+        'frontend lint and component tests pass', failed is None, tail(failed, 8) if failed else '',
+    ))
+    return checks
+
+
+def project_package(project: Path) -> str:
+    """
+    The project package, from DJANGO_SETTINGS_MODULE of manage.py.
+    """
+    match = re.search(r"DJANGO_SETTINGS_MODULE', '(\w+)\.settings'", (project / 'manage.py').read_text())
+    return match.group(1) if match else project.name
+
+
+def free_port() -> int:
+    with socket.socket() as sock:
+        sock.bind(('127.0.0.1', 0))
+        return sock.getsockname()[1]
+
+
+def wait_for_port(port: int, server: subprocess.Popen, seconds: int = 60) -> bool:
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline and server.poll() is None:
+        with socket.socket() as sock:
+            if sock.connect_ex(('127.0.0.1', port)) == 0:
+                return True
+        time.sleep(0.5)
+    return False
+
+
+def serve(command: list[str], cwd: Path, env: dict, port: int) -> subprocess.Popen | None:
+    """
+    Starts a server in a session of its own and waits until it listens on the port; None
+    if it did not start (it is stopped then).
+    """
+    server = subprocess.Popen(
+        command, cwd=cwd, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        stdin=subprocess.DEVNULL, start_new_session=True,
+    )
+    if wait_for_port(port, server):
+        return server
+    stop(server)
+    return None
+
+
+def end_to_end(project: Path, env: dict) -> Check:
+    """
+    The end-to-end tests of the frontend against the backend (uvicorn) and the dev server of
+    the frontend (Vite, its `/api` going to the backend), both on free ports of their own,
+    with the test data of `manage.py e2e_data`.
+    """
+    name = 'end-to-end tests pass'
+    password = secrets.token_urlsafe(12)
+    env = {**env, 'E2E_PASSWORD': password}
+    data = run(project, ['manage.py', 'e2e_data'], env)
+    if data.returncode:
+        return Check(name, False, 'manage.py e2e_data: ' + tail(data, 6))
+    frontend = project / 'frontend'
+    browser = npm(frontend, ['exec', '--', 'playwright', 'install', 'chromium'], env)
+    if browser.returncode:
+        return Check(name, False, 'playwright install: ' + tail(browser, 6))
+    servers = []
+    try:
+        api, web = free_port(), free_port()
+        backend = serve(
+            [python_of(project), '-m', 'uvicorn', f'{project_package(project)}.main:app',
+             '--host', '127.0.0.1', '--port', str(api)],
+            project, env, api,
+        )
+        if backend is None:
+            return Check(name, False, 'the backend did not start (uvicorn)')
+        servers.append(backend)
+        env = {**env, 'BAZIS_API_URL': f'http://127.0.0.1:{api}'}
+        dev = serve(
+            [shutil.which('npm') or 'npm', 'run', 'dev', '--', '--host', '127.0.0.1',
+             '--port', str(web), '--strictPort'],
+            frontend, env, web,
+        )
+        if dev is None:
+            return Check(name, False, 'the dev server of the frontend did not start (npm run dev)')
+        servers.append(dev)
+        # E2E_BASE_URL: the tests use this dev server and never start or reuse another one
+        tests = npm(frontend, ['run', 'e2e'], {**env, 'E2E_BASE_URL': f'http://127.0.0.1:{web}'})
+        return Check(name, tests.returncode == 0, tail(tests, 10))
+    finally:
+        for server in servers:
+            stop(server)
+
+
+def frontend_database_checks(project: Path, env: dict, migrated: bool, reason: str = '') -> list[Check]:
+    """
+    The checks of the frontend that need the migrated database: the contract is that of the
+    backend, and the end-to-end tests pass.
+    """
+    if not (project / 'frontend' / 'bazis-front.lock.json').is_file():
+        return []  # `frontend created` failed already
+    if not migrated:
+        reason = reason or 'the migrations did not apply'
+        return [Check('contract fresh', False, reason), Check('end-to-end tests pass', False, reason)]
+    contract = run(project, ['manage.py', 'bazis_front', 'contract', '--check'], env)
+    return [Check('contract fresh', contract.returncode == 0, tail(contract, 6)), end_to_end(project, env)]
 
 
 def score(checks: list[Check]) -> float:

@@ -16,7 +16,8 @@
 Runs the evals: for every task of tasks.toml, `bazis new` builds the project from its
 description (the real agent: it spends credits, limited by --budget per task), then the
 grader checks the result. Writes a JSON file per task and summary.md to the results
-directory.
+directory. A task with a frontend installs bazis-front (BAZIS_FRONT_REQUIREMENT points
+to a build of it that is not on PyPI) and needs Node.js.
 
     python -m evals.run --budget 5 [--task library] [--model claude-opus-5-5]
     python -m evals.run --grade-only RESULTS_DIR      # grade the projects again
@@ -53,18 +54,21 @@ async def build(task: dict, project: Path, args) -> dict:
     Builds the project of a task with the agent of `bazis new`; returns the run facts.
     """
     name = scaffold.package_name(project)
-    scaffold.write_files(project, name)
-    scaffold.create_venv(project)
+    frontend = task.get('frontend', False)
+    # without --language: the agent finds the `language` of a task in its description
+    scaffold.write_files(project, name, frontend=frontend)
+    database = scaffold.create_database(project, name, scaffold.create_venv(project))
     started = time.monotonic()
     with (project.parent / f'{task["id"]}.log').open('w', encoding='utf-8') as log:
         result = await agent.run(
             agent.Task(
-                prompt=main.new_prompt(task['description'], name),
+                prompt=main.new_prompt(task['description'], name, frontend, database=database),
                 project_dir=project,
                 model=args.model,
                 effort=args.effort,
                 max_budget_usd=args.budget,
                 yes=True,  # no terminal: the agent runs commands in its own project only
+                extra_rules=[agent.FRONTEND_RULES] if frontend else [],
             ),
             out=log,
         )

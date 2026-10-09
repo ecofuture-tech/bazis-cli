@@ -63,18 +63,151 @@ separate package `bazis-<name>`. A project installs only the packages it needs.
   of every package before you use it and follow it exactly.
 - Read `AGENTS.md` (and `CLAUDE.md` if there is one) of the project first.
 - The Python environment is `.venv` (`.venv/bin/python`, on Windows
-  `.venv\\Scripts\\python.exe`). Add a package to `requirements.txt`, install it with
+  `.venv\\Scripts\\python.exe`); `installed_version` of `list_packages` is the version in it.
+  Add a package to `requirements.txt` with its latest release as the minimum
+  (`<name>>=<catalog_version>` of `list_packages`; a package without a `catalog_version`,
+  such as bazis-front, without a minimum, as its guide or the task says), install it with
   `.venv/bin/python -m pip install -r requirements.txt` and list its app in
   `BS_INSTALLED_APPS` of `project.env` when its guide says so.
 - After changing models run `.venv/bin/python manage.py makemigrations`. After every change
-  run `run_doctor` and fix the errors and the warnings of the packages you used. Run the
+  run `run_doctor` and fix the errors and the warnings of the packages you used. With the
+  database of `.env` it also checks the data against the declarations (`permit.W005`,
+  `statusy.W003`: migrate); the info `bazis.database` says the database could not be
+  reached and those checks did not run. Run the
   tests with `.venv/bin/python -m pytest` when PostgreSQL and Redis are available (`.env`);
   if they are not, say so instead of skipping the tests silently.
 - Write tests for the behavior you add (`tests/`), with `bazis_test_utils` as the guides show.
-- Never read, print or copy the values of `.env`. Never run git commands that change the
-  repository (commit, push, reset): the user reviews and commits the changes.
+  Its pytest plugin installs the triggers of pgtrigger in the test database: never write a
+  `django_db_setup`, a fixture that installs the triggers or one that creates the declared
+  roles, statuses or transits.
+- The tests share Redis (`BS_CACHES__DEFAULT__LOCATION`) with the running backend and other
+  projects: never flush its database or call `cache.clear()`. The session fixture of
+  `tests/conftest.py` gives the cache keys of the tests a prefix of their own and deletes
+  only them at the end: keep it, and delete only those keys (`cache.delete_pattern('*')`).
+  A test with `transaction=True` empties the tables after it; the flush applies the
+  declarations again, the other data of a test is created by the test or its fixtures.
+- The roles of bazis-permit (with their permission groups) are declared in `<app>/roles.py`
+  and the statuses and transits of bazis-statusy in `<app>/workflow.py`, as their guides
+  show, never created by data migrations, commands or fixtures: `migrate` applies them. A
+  project whose data migrations already create them moves them into these modules and
+  keeps those migrations as history without effect (`operations = []`, their
+  dependencies kept): `migrate` takes over the existing rows.
+- With bazis-ws, publish from the code of a write with `notify(users, lambda user:
+  notification(...))` and `publish_changed(item)` of `bazis.contrib.ws.messages` (after the
+  commit, in the language of each user), never with a Redis client or `on_commit` of your
+  own, and route the socket with `router.register('bazis.contrib.ws.router')` in the root
+  router module.
+- A route set of bazis-permit that restricts its objects with its own `restrict_queryset`
+  and applies it in its `get_queryset` (`FileUploadRouteSet` of bazis-uploadable, the
+  routes of bazis-bg, their subclasses) needs no `permit_public = True`, which says that the data of the route is public: set it
+  only on a route whose data is public (`permit.W002` names the routes that restrict
+  nothing).
+- A location is a `PointField` of `django.contrib.gis.db.models` (`geography=True` when the
+  product measures distances, for the index of the distances), never two `FloatField`s.
+  What is near is filtered and sorted by the core, `filter=<field>__near=<lon>,<lat>,5km`
+  and `sort=<field>__distance(<lon>,<lat>)` with the point field in the LIST schema of the
+  route, never by a distance computed in Python or SQL of your own; a distance in the code
+  is `point_distance`/`point_within` of `bazis.core.utils.geo`, as the guide of the core
+  shows.
+- With bazis-users, the root router module imports `bazis.contrib.users.token` (the token
+  endpoint) unless it registers the user routes (`users.E002`), and a user model of the
+  project has `UserLanguageMixin`, so that the language of a user follows him.
+- Temporary files (scripts, outputs, screenshots) go to `.scratch/` of the project, which
+  Git ignores; never to `/tmp` or other directories outside the project.
+- Never read, print or copy the values of `.env`. Never write a password, token or other
+  secret, also of the test users, in your messages or the summary: say where it is set
+  (such as `E2E_PASSWORD`). Never run git commands that change the repository (commit,
+  push, reset): the user reviews and commits the changes.
+- The database of `.env` is created by `bazis new` when PostgreSQL is reachable, with
+  PostGIS (the task says what it did). Never drop or recreate it: after the first
+  `migrate` add new migrations, never delete or generate again the applied ones. You may
+  create it when it is missing (`CREATE DATABASE`, then `CREATE EXTENSION postgis` in it);
+  report it. When the task says that the database already has data of another project or
+  could not be inspected, it is not ready: never migrate it nor change its data, say that
+  the user checks the access to it or sets another `BS_DATABASES__DEFAULT__NAME` in `.env`.
 - End with a short summary: what you built or changed, the Bazis packages used, how to run
-  it, and what is left for the user (for example the database).
+  it, what you created outside the files (such as the database), and what is left for the
+  user.
+
+# Languages
+
+The languages of the product are `BS_LANGUAGES` and `BS_LANGUAGE_CODE` of `project.env`;
+English, the language of the msgids, is always one of them.
+
+- The texts of the code are English msgids through `gettext_lazy`
+  (`from django.utils.translation import gettext_lazy as _`): `verbose_name`, `help_text`,
+  the labels of `choices`, the titles and the messages. Keep them lazy (no `str()` or
+  f-string of them). No text in another language in the code; the names of the declared
+  roles, statuses and transits are English msgids too, which `migrate` translates into the
+  column of each language with the catalog of the project.
+- Translate them into every other language in the catalogs of the project
+  (`locale/<language>/LC_MESSAGES/django.po` of the project and of its apps) with
+  `.venv/bin/python manage.py bazis_messages`, run in the project root: `make` (it creates
+  `locale/`, runs makemessages with the ignores of a project and prints what is
+  `untranslated` or `fuzzy`), write the translations of those entries to
+  `locale/translations.json` (`{"<language>": {"<msgid>": "<msgstr>"}}`, a plural with the
+  list of its forms, as the guide of the core shows), then `apply locale/translations.json
+  --check` (it compiles the catalogs). Remove from the file the msgids that `apply`
+  reports as `unknown` (no longer in the code). Keep the JSON file in the project and add
+  to it after every `make`; keep the `.po` and the `.mo` files. Never write a script that
+  edits the `.po` files, never run `makemessages` or `compilemessages` yourself.
+- `bazis_messages` needs GNU gettext (`xgettext`, `msgmerge`, `msgfmt`). Without it, say
+  in the summary that the catalogs were not made and that the user installs gettext; never
+  work around it (no `.po` or `.mo` written another way).
+- `bazis.W004` of `run_doctor` (two Bazis packages translate a msgid differently): the
+  project translates the msgid itself. Declare it in `<project>/translations.py` (the
+  package of the settings) with `gettext_noop` (`from django.utils.translation import
+  gettext_noop`), so that `make` keeps it, and translate it through `bazis_messages` like
+  the other texts: the catalog of the project wins. `bazis.W005` (a language without the
+  translations of the texts of a Bazis package): report it in the summary.
+"""
+
+#: the rules of a project with a frontend made by bazis-front (Task.extra_rules)
+FRONTEND_RULES = """\
+# The frontend (bazis-front)
+
+The product has a frontend made by bazis-front: the specs of the product in `spec/`, the
+contract generated from the backend in `contract/`, the React app in `frontend/`. The
+guides are `package_guide("bazis-front")` and `frontend/AGENTS.md`: read them before you
+change the frontend and follow them exactly. All the frontend logic is in bazis-front: use
+its commands, do not write generators or frontends of your own.
+
+- The frontend is changed with the subcommands of `.venv/bin/python manage.py bazis_front`
+  (`init`, `contract`, `check`, `add`, `design`, `e2e`, `update`). The MCP tools read it: `front_check` (the issues of the specs
+  against the contract, with a `hint` each), `front_status` (what is stale and the command
+  that updates it) and `front_catalog` (the components, the capabilities and the assets
+  they require).
+- The specs describe the product and the backend is built to satisfy them. After every
+  change of the models, routes, roles, statuses or transits: migrate, export the contract
+  (`bazis_front contract`), then fix the spec or the backend until `front_check` reports
+  no errors.
+- Never edit `contract/`, `frontend/src/bazis/generated/`, `frontend/e2e/generated/`, the
+  copies of `frontend/src/bazis/client/`, `frontend/src/bazis/react/`,
+  `frontend/e2e/bazis/`, `frontend/bazis-front.lock.json` or `frontend/.bazis/`: generate
+  them again with the commands, and wrap the copies in the product code.
+- The backend decides the permissions (bazis-permit): never encode roles or permission
+  rules in the frontend. The screens use the tokens of the design, never literal colors.
+- The frontend is in the languages of the backend (`languages` and `language` of
+  `spec/product.yaml` as `BS_LANGUAGES` and `BS_LANGUAGE_CODE`): every text of a screen
+  goes through `t()` with a key in the dictionaries of the product,
+  `frontend/src/i18n/<language>.ts`, one for each language (listed in
+  `frontend/src/i18n/index.ts`); never a text in the JSX.
+- The permit roles with their permissions and the statuses and transits of the workflows
+  are declared in `roles.py` and `workflow.py` and applied by `migrate`: the contract is
+  exported from the migrated database. The test
+  data of the end-to-end tests is the e2e data command recommended by bazis-front,
+  `.venv/bin/python manage.py e2e_data`: on top of the migrations it creates only a user
+  per `test_user` of the roles, with its role and the password of the environment
+  variable `E2E_PASSWORD`, and the records the scenarios need (the items they open). It
+  can run again (it sets the passwords again).
+- After changing the frontend run in `frontend/` `npx tsc --noEmit`, `npm run lint` and
+  `npm test`; after changing the specs or the screens also `bazis_front e2e` and
+  `npm run e2e` against the running backend: migrate, run `e2e_data`, start
+  `.venv/bin/uvicorn <project package>.main:app --port 8000` in the background, run
+  `E2E_PASSWORD=<the same password> npm run e2e`, then stop the backend.
+- Node.js with npm is needed by `npm install`, the TypeScript of the contract
+  (`schema.d.ts`), the build and the tests of the frontend, and the contract by a migrated
+  database. Without them do the other steps and say which ones did not run.
 """
 
 
@@ -98,8 +231,8 @@ class Task:
 
 def mcp_server(project_dir: Path) -> dict:
     """
-    The stdio MCP server bazis-mcp of the project, run with the Python of the CLI (it uses
-    `.venv` of the project for the project tools).
+    The stdio MCP server bazis-mcp of the project, run with the Python of the CLI (it reads
+    the installed packages and runs the project tools with `.venv` of the project).
     """
     return {
         'type': 'stdio',
