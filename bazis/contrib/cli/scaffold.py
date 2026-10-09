@@ -253,7 +253,9 @@ guide is `frontend/AGENTS.md`). Node.js 22.12 or newer with npm is needed for th
 
 #: run by the Python of a project in its directory (`create_database`): creates the database
 #: of its settings (`.env`, the `BS_*` variables of the environment) when it is missing, with
-#: PostGIS for the PostGIS backend, and prints the outcome as a JSON object
+#: PostGIS for the PostGIS backend, and prints the outcome as a JSON object: `outcome`
+#: (`created`, `exists`, `has_data`: tables of another project, `unreachable`, `failed`,
+#: `other`: not PostgreSQL), `detail` (the error) and `postgis` (the error of the extension)
 CREATE_DATABASE_PY = """\
 import json
 import os
@@ -285,14 +287,29 @@ else:
                 exists = server.execute(query, [db['NAME']]).fetchone() is not None
                 if not exists:
                     server.execute(sql.SQL('CREATE DATABASE {}').format(sql.Identifier(db['NAME'])))
-            if backend == 'postgis':
-                with psycopg.connect(
-                    dbname=db['NAME'], autocommit=True, connect_timeout=5, **params
-                ) as database:
-                    database.execute('CREATE EXTENSION IF NOT EXISTS postgis')
             result['outcome'] = 'exists' if exists else 'created'
+            with psycopg.connect(
+                dbname=db['NAME'], autocommit=True, connect_timeout=5, **params
+            ) as database:
+                # a table of the public schema that no extension (PostGIS) owns: data
+                query = (
+                    "SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+                    "WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') AND NOT EXISTS "
+                    "(SELECT 1 FROM pg_depend d WHERE d.objid = c.oid AND d.deptype = 'e') "
+                    "LIMIT 1"
+                )
+                if exists and database.execute(query).fetchone():
+                    result['outcome'] = 'has_data'
+                elif backend == 'postgis':
+                    try:
+                        database.execute('CREATE EXTENSION IF NOT EXISTS postgis')
+                    except psycopg.Error as err:
+                        result['postgis'] = ' '.join(str(err).split())
         except psycopg.Error as err:
-            result.update(outcome='failed', detail=' '.join(str(err).split()))
+            if 'outcome' in result:
+                result['detail'] = ' '.join(str(err).split())
+            else:
+                result.update(outcome='failed', detail=' '.join(str(err).split()))
 print(json.dumps(result))
 """
 
@@ -501,11 +518,23 @@ def create_database(directory: Path, name: str, python: Path | str = sys.executa
         error = done.stderr.strip().splitlines()
         return f'{not_created}: {error[-1] if error else "its script printed nothing"}'
     database, server = f'`{result["name"]}`', f'PostgreSQL {result["server"]}'
+    if result.get('postgis'):
+        state = f', but PostGIS is not installed in it: {result["postgis"]}'
+    elif result.get('detail'):
+        state = f', but it could not be opened: {result["detail"]}'
+    else:
+        state = '.'
     match result['outcome']:
         case 'created':
-            return f'Created the database {database} on {server}.'
+            return f'Created the database {database} on {server}{state}'
         case 'exists':
-            return f'The database {database} exists on {server}.'
+            return f'The database {database} exists on {server} without tables{state}'
+        case 'has_data':
+            return (
+                f'The database {database} on {server} already has data, probably of another '
+                'project: it is not the database of this project. Set '
+                '`BS_DATABASES__DEFAULT__NAME` in `.env` to a new name before migrating.'
+            )
         case 'unreachable':
             return (
                 f'{server} cannot be reached ({result["detail"]}): the database {database} '

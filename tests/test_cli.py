@@ -404,7 +404,20 @@ def test_create_database(tmp_path):
     assert outcome('created') == 'Created the database `shop` on PostgreSQL db:5432.'
     command, cwd = commands[0]
     assert command == ['/p/python', '-c', scaffold.CREATE_DATABASE_PY, 'shop'] and cwd == tmp_path
-    assert outcome('exists') == 'The database `shop` exists on PostgreSQL db:5432.'
+    assert outcome('exists') == 'The database `shop` exists on PostgreSQL db:5432 without tables.'
+    # the database and PostGIS are separate outcomes
+    assert outcome('created', postgis='extension "postgis" is not available') == (
+        'Created the database `shop` on PostgreSQL db:5432, but PostGIS is not installed in '
+        'it: extension "postgis" is not available'
+    )
+    assert outcome('exists', postgis='permission denied') == (
+        'The database `shop` exists on PostgreSQL db:5432 without tables, but PostGIS is not '
+        'installed in it: permission denied'
+    )
+    # tables of another project: not the database of this one
+    has_data = outcome('has_data')
+    assert has_data.startswith('The database `shop` on PostgreSQL db:5432 already has data')
+    assert '`BS_DATABASES__DEFAULT__NAME` in `.env`' in has_data
     unreachable = outcome('unreachable', detail='connection refused')
     assert 'cannot be reached (connection refused)' in unreachable and 'not created' in unreachable
     assert outcome('failed', detail='permission denied') == (
@@ -453,7 +466,7 @@ def test_create_database_of_a_project_without_postgres(tmp_path, monkeypatch):
 def test_create_database_of_a_project(tmp_path, monkeypatch):
     """
     The database of the settings of the project is created with PostGIS, once: the second
-    run finds it.
+    run finds it, and one with tables is reported as the data of another project.
     """
     import psycopg
 
@@ -467,12 +480,16 @@ def test_create_database_of_a_project(tmp_path, monkeypatch):
         assert create_database(directory, 'shop') == (
             f'Created the database `{name}` on PostgreSQL {host}:{port}.'
         )
+        # PostGIS, whose table is no data of a project
         assert create_database(directory, 'shop') == (
-            f'The database `{name}` exists on PostgreSQL {host}:{port}.'
+            f'The database `{name}` exists on PostgreSQL {host}:{port} without tables.'
         )
         with psycopg.connect(dbname=name, **server) as database:
             query = "SELECT 1 FROM pg_extension WHERE extname = 'postgis'"
             assert database.execute(query).fetchone()
+            # the data of a project
+            database.execute('CREATE TABLE django_migrations (id serial)')
+        assert 'already has data, probably of another project' in create_database(directory, 'shop')
     finally:
         with psycopg.connect(dbname='postgres', **server) as database:
             database.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
@@ -764,6 +781,7 @@ def test_rules_of_the_packages_and_of_what_the_agent_leaves():
                  'also of the test users', '`E2E_PASSWORD`',
                  'The database of `.env` is created by `bazis new`', 'Never drop or recreate it',
                  'never delete or generate again the applied ones', 'CREATE EXTENSION postgis',
+                 'already has data of another project', 'never migrate it',
                  'what you created outside the files (such as the database)'):
         assert text in rules, text
     assert '.scratch/' in scaffold.GITIGNORE.splitlines()

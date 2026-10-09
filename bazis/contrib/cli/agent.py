@@ -110,7 +110,9 @@ separate package `bazis-<name>`. A project installs only the packages it needs.
   PostGIS (the task says what it did). Never drop or recreate it: after the first
   `migrate` add new migrations, never delete or generate again the applied ones. You may
   create it when it is missing (`CREATE DATABASE`, then `CREATE EXTENSION postgis` in it);
-  report it.
+  report it. When the task says that the database already has data of another project,
+  never migrate it nor change its data: say that the user sets another
+  `BS_DATABASES__DEFAULT__NAME` in `.env`.
 - End with a short summary: what you built or changed, the Bazis packages used, how to run
   it, what you created outside the files (such as the database), and what is left for the
   user.

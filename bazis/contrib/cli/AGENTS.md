@@ -11,8 +11,9 @@ Bazis. It is a tool for the developer's machine, not a dependency of a project.
   `requirements*.txt`, `tests/`, `locale/`, `.mcp.json`, `AGENTS.md`), creates `.venv` with Bazis and
   bazis-mcp (`--no-venv` skips it) and the database of the settings of the project (`.env`,
   the `BS_DATABASES__DEFAULT__*` variables) with the extension PostGIS when PostgreSQL is
-  reachable and the database is missing (it says when it cannot, and goes on; the agent is
-  told what it did), then the agent chooses the Bazis packages and builds the apps,
+  reachable and the database is missing (it says when it cannot, when PostGIS could not be
+  installed, and when an existing database has tables, probably of another project, and
+  goes on; the agent is told what it did), then the agent chooses the Bazis packages and builds the apps,
   migrations and tests. By default the product also gets its frontend: bazis-front
   is in `requirements.txt` and `BS_INSTALLED_APPS`, and the agent follows the order of the
   guide of bazis-front (`bazis_front init`, the specs in `spec/`, the backend that
