@@ -85,7 +85,8 @@ The tests of a project need PostgreSQL with PostGIS and Redis (settings in `.env
 them the agent creates the migrations and runs the system checks, and says that the tests
 did not run.
 
-The roles, statuses and transits of a product are data migrations. The end-to-end tests of
+The roles of a product are declared in `<app>/roles.py` and its statuses and transits in
+`<app>/workflow.py`; `migrate` applies them. The end-to-end tests of
 the frontend run against the backend with the test data of `python manage.py e2e_data`
 (the e2e data command recommended by bazis-front): the test users of the roles, with the
 password of `E2E_PASSWORD`, and the records the scenarios need:

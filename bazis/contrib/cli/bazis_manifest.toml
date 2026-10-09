@@ -35,7 +35,7 @@ text = "the tests of a new project need PostgreSQL with PostGIS and Redis (.env)
 text = "bazis new builds the frontend by default and then needs Node.js 22.12 or newer with npm; --no-frontend builds only the backend, and bazis add bazis-front adds the frontend later"
 
 [[pitfalls]]
-text = "the contract and the end-to-end tests of the frontend need a migrated PostgreSQL database; roles, statuses and transits are data migrations, and the test users and records of the end-to-end tests come from manage.py e2e_data, the e2e data command recommended by bazis-front (E2E_PASSWORD)"
+text = "the contract and the end-to-end tests of the frontend need a migrated PostgreSQL database; roles, statuses and transits are declared in roles.py and workflow.py and applied by migrate, and the test users and records of the end-to-end tests come from manage.py e2e_data, the e2e data command recommended by bazis-front (E2E_PASSWORD)"
 
 [[pitfalls]]
 text = "a product is in the language of its description and in English; bazis new --language CODE chooses the language instead of the agent"

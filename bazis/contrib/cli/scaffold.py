@@ -33,8 +33,8 @@ from pathlib import Path
 #: the packages of every project; the agent adds the Bazis packages the project needs. The
 #: minimums are the latest releases, not older than those of the catalog of bazis-mcp
 #: (tests/test_cli.py compares them), so that the guides describe the installed versions
-REQUIREMENTS = ['bazis>=2.11.0']
-REQUIREMENTS_DEV = ['bazis-mcp>=2.4.5', 'bazis-test-utils>=2.4.0']
+REQUIREMENTS = ['bazis>=2.13.0']
+REQUIREMENTS_DEV = ['bazis-mcp>=2.4.5', 'bazis-test-utils>=2.5.0']
 
 #: the frontend layer of a product (`bazis new` without `--no-frontend`)
 FRONTEND_REQUIREMENT = 'bazis-front>=0.1.0'
@@ -162,7 +162,15 @@ PYTEST_INI = '''[pytest]
 DJANGO_SETTINGS_MODULE = {name}.settings
 '''
 
-CONFTEST_PY = '''import uuid
+CONFTEST_PY = '''"""
+The fixtures of the tests. The pytest plugin of bazis-test-utils installs the triggers of
+pgtrigger in the test database, and `migrate` applies the roles and the workflows declared
+in `<app>/roles.py` and `<app>/workflow.py`, also again after the flush of a test with
+`transaction=True`: no fixture installs the triggers or creates the roles, statuses or
+transits. A test that changes the declared rows itself takes the fixture `bazis_declared`.
+"""
+
+import uuid
 
 import pytest
 from django.test import override_settings
@@ -234,8 +242,8 @@ guide is `frontend/AGENTS.md`). Node.js 22.12 or newer with npm is needed for th
 - `contract/`, `frontend/src/bazis/generated/` and `frontend/e2e/generated/` are only
   generated (`bazis_front contract`, `design`, `e2e`), never edited; the MCP tool
   `front_status` says what is stale.
-- The permit roles and the statuses and transits are data migrations. The test data of the
-  end-to-end tests is `python manage.py e2e_data` (the e2e data command recommended by
+- The permit roles are declared in `<app>/roles.py` and the statuses and transits in
+  `<app>/workflow.py`: `migrate` applies them. The test data of the end-to-end tests is `python manage.py e2e_data` (the e2e data command recommended by
   bazis-front): the test users of the roles of the specs, with the password of
   `E2E_PASSWORD`, and the records the scenarios need.
 - In `frontend/`: `npx tsc --noEmit`, `npm run lint`, `npm test`, and `npm run e2e` against

@@ -70,16 +70,30 @@ separate package `bazis-<name>`. A project installs only the packages it needs.
   `.venv/bin/python -m pip install -r requirements.txt` and list its app in
   `BS_INSTALLED_APPS` of `project.env` when its guide says so.
 - After changing models run `.venv/bin/python manage.py makemigrations`. After every change
-  run `run_doctor` and fix the errors and the warnings of the packages you used. Run the
+  run `run_doctor` and fix the errors and the warnings of the packages you used. With the
+  database of `.env` it also checks the data against the declarations (`permit.W005`,
+  `statusy.W003`: migrate); the info `bazis.database` says the database could not be
+  reached and those checks did not run. Run the
   tests with `.venv/bin/python -m pytest` when PostgreSQL and Redis are available (`.env`);
   if they are not, say so instead of skipping the tests silently.
 - Write tests for the behavior you add (`tests/`), with `bazis_test_utils` as the guides show.
+  Its pytest plugin installs the triggers of pgtrigger in the test database: never write a
+  `django_db_setup`, a fixture that installs the triggers or one that creates the declared
+  roles, statuses or transits.
 - The tests share Redis (`BS_CACHES__DEFAULT__LOCATION`) with the running backend and other
   projects: never flush its database or call `cache.clear()`. The session fixture of
   `tests/conftest.py` gives the cache keys of the tests a prefix of their own and deletes
   only them at the end: keep it, and delete only those keys (`cache.delete_pattern('*')`).
-  A test with `transaction=True` empties the tables after it: before creating data again
-  (roles, statuses), delete those keys and call `ContentType.objects.clear_cache()`.
+  A test with `transaction=True` empties the tables after it; the flush applies the
+  declarations again, the other data of a test is created by the test or its fixtures.
+- The roles of bazis-permit (with their permission groups) are declared in `<app>/roles.py`
+  and the statuses and transits of bazis-statusy in `<app>/workflow.py`, as their guides
+  show, never created by data migrations, commands or fixtures: `migrate` applies them.
+- With bazis-ws, publish from the code of a write with `notify(users, lambda user:
+  notification(...))` and `publish_changed(item)` of `bazis.contrib.ws.messages` (after the
+  commit, in the language of each user), never with a Redis client or `on_commit` of your
+  own, and route the socket with `router.register('bazis.contrib.ws.router')` in the root
+  router module.
 - With bazis-users, the root router module imports `bazis.contrib.users.token` (the token
   endpoint) unless it registers the user routes (`users.E002`), and a user model of the
   project has `UserLanguageMixin`, so that the language of a user follows him.
@@ -102,8 +116,9 @@ English, the language of the msgids, is always one of them.
 - The texts of the code are English msgids through `gettext_lazy`
   (`from django.utils.translation import gettext_lazy as _`): `verbose_name`, `help_text`,
   the labels of `choices`, the titles and the messages. Keep them lazy (no `str()` or
-  f-string of them). No text in another language in the code; the data migrations set the
-  names of the roles, statuses and transits in the column of each language.
+  f-string of them). No text in another language in the code; the names of the declared
+  roles, statuses and transits are English msgids too, which `migrate` translates into the
+  column of each language with the catalog of the project.
 - Translate them into every other language in the catalog of the project,
   `locale/<language>/LC_MESSAGES/django.po` (the directory `locale/` stays, even empty):
   run `.venv/bin/python manage.py makemessages -l <language> --ignore frontend --ignore
@@ -148,7 +163,8 @@ its commands, do not write generators or frontends of your own.
   `frontend/src/i18n/<language>.ts`, one for each language (listed in
   `frontend/src/i18n/index.ts`); never a text in the JSX.
 - The permit roles with their permissions and the statuses and transits of the workflows
-  are data migrations: the contract is exported from the migrated database. The test
+  are declared in `roles.py` and `workflow.py` and applied by `migrate`: the contract is
+  exported from the migrated database. The test
   data of the end-to-end tests is the e2e data command recommended by bazis-front,
   `.venv/bin/python manage.py e2e_data`: on top of the migrations it creates only a user
   per `test_user` of the roles, with its role and the password of the environment

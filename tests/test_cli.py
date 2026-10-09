@@ -555,16 +555,39 @@ def test_frontend_rules():
 
 def test_rules_and_steps_agree_on_the_test_data():
     """
-    Roles, statuses and transits are data migrations (the contract is exported after
-    migrate); `e2e_data` only adds the test users and the records of the scenarios.
+    Roles, statuses and transits are declared in `roles.py` and `workflow.py` (the contract
+    is exported after migrate); `e2e_data` only adds the test users and the records of the
+    scenarios.
     """
     rules = ' '.join(agent.FRONTEND_RULES.split())
     steps = ' '.join(main.FRONTEND_STEPS.split())
     for text in (rules, steps):
-        assert 'statuses and transits of the workflows' in text and 'data migrations' in text
+        assert 'statuses and transits of the workflows' in text
+        assert 'declared in `roles.py` and `workflow.py`' in text and 'data migration' not in text
         assert 'the e2e data command recommended by bazis-front' in text
     assert 'it creates only a user per `test_user`' in rules
     assert '`e2e_data`, with only the test users and the records the scenarios need' in steps
+
+
+def test_the_rules_follow_the_released_stack():
+    """
+    The rules of every task and the skeleton use the released stack: the declarations of
+    bazis-permit and bazis-statusy applied by migrate, the pytest plugin of bazis-test-utils
+    (no hand-written fixture of the triggers or of the declared data), `notify()` of
+    bazis-ws, and the database checks of `run_doctor`.
+    """
+    rules = ' '.join(agent.RULES.split())
+    for text in ('`<app>/roles.py`', '`<app>/workflow.py`', 'never created by data migrations',
+                 '`django_db_setup`', 'notify(users, lambda user: notification(...))',
+                 'publish_changed(item)', "router.register('bazis.contrib.ws.router')",
+                 '`permit.W005`', '`statusy.W003`', '`bazis.database`'):
+        assert text in rules, text
+    assert 'clear_cache' not in rules and 'data migrations set' not in rules
+
+    conftest = scaffold.CONFTEST_PY
+    assert 'def django_db_setup' not in conftest and 'pgtrigger install' not in conftest
+    assert 'plugin of bazis-test-utils' in conftest and '`bazis_declared`' in conftest
+    assert 'data migration' not in scaffold.AGENTS_MD_FRONTEND
 
 
 def test_new_without_a_frontend(tmp_path, fake_agent):
@@ -633,7 +656,7 @@ def test_rules_of_the_languages_and_the_tests():
     for text in ('gettext_lazy', 'English msgids', 'locale/<language>/LC_MESSAGES/django.po',
                  'makemessages', 'compilemessages', 'bazis.W004', 'bazis.W005',
                  'never flush', 'cache.clear()', "cache.delete_pattern('*')",
-                 'ContentType.objects.clear_cache()', 'bazis.contrib.users.token',
+                 'the flush applies the declarations again', 'bazis.contrib.users.token',
                  'users.E002', 'UserLanguageMixin'):
         assert text in rules, text
     frontend = ' '.join(agent.FRONTEND_RULES.split())

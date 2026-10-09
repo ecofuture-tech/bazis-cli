@@ -48,7 +48,7 @@ FRONTEND_STEPS = """\
    `front_check` and fix the errors of the shape and of the references.
 3. Make the backend satisfy the specs: the apps, models, route sets and routers; the
    permit roles with the permissions of the access and the statuses and transits of the
-   workflows as data migrations; the e2e data command recommended by bazis-front,
+   workflows declared in `roles.py` and `workflow.py`; the e2e data command recommended by bazis-front,
    `e2e_data`, with only the test users and the records the scenarios need; tests; the
    translations of the backend in each language other than English; `makemigrations`;
    `run_doctor` without errors.
