@@ -188,8 +188,9 @@ def test_scaffold_in_a_language(tmp_path):
 def test_bazis_messages_keeps_the_catalogs_of_the_project(tmp_path):
     """
     The loop of the rules in a new project: `bazis_messages make` creates `locale/` and writes
-    the msgids of the project there (never into the catalog of a package), `apply` of
-    `locale/translations.json` fills and compiles it.
+    the msgids of the project there (never into the catalog of a package), also a msgid of a
+    package declared with `gettext_noop` in `<project>/translations.py` (bazis.W004), `apply`
+    of `locale/translations.json` fills and compiles it.
     """
     if shutil.which('xgettext') is None:
         pytest.skip('gettext is not installed')
@@ -198,11 +199,15 @@ def test_bazis_messages_keeps_the_catalogs_of_the_project(tmp_path):
     (directory / 'shop' / 'texts.py').write_text(
         "from django.utils.translation import gettext_lazy as _\n\nTITLE = _('A text of the shop')\n"
     )
+    (directory / 'shop' / 'translations.py').write_text(
+        "from django.utils.translation import gettext_noop\n\nPACKAGE_MSGIDS = [gettext_noop('Name')]\n"
+    )
     done = manage(directory, 'bazis_messages', 'make')
     assert done.returncode == 0, done.stderr[-3000:]
     status = json.loads(done.stdout)['ru']
     assert status['catalogs'] == ['locale/ru/LC_MESSAGES/django.po']
     assert {'msgid': 'A text of the shop'} in status['untranslated']
+    assert {'msgid': 'Name'} in status['untranslated']
 
     translations = {'ru': {it['msgid']: f'[{it["msgid"]}]' for it in status['untranslated']}}
     (directory / 'locale' / 'translations.json').write_text(json.dumps(translations), encoding='utf-8')
@@ -807,6 +812,7 @@ def test_rules_of_the_points_and_of_the_routes_that_restrict_themselves():
                  'never by a distance computed in Python or SQL of your own',
                  '`point_distance`/`point_within` of `bazis.core.utils.geo`',
                  'needs no `permit_public = True`', '`FileUploadRouteSet` of bazis-uploadable',
+                 'applies it in its `get_queryset`',
                  'the routes of bazis-bg', 'only on a route whose data is public'):
         assert text in rules, text
 
@@ -818,7 +824,10 @@ def test_rules_of_the_languages_and_the_tests():
                  '`apply locale/translations.json --check`', 'Keep the JSON file in the project',
                  'Never write a script that edits the `.po` files',
                  'never run `makemessages` or `compilemessages` yourself',
-                 'bazis.W004', 'bazis.W005', 'never add them to the `.po` files',
+                 'Remove from the file the msgids that `apply` reports as `unknown`',
+                 'needs GNU gettext', 'never work around it',
+                 'bazis.W004', '`<project>/translations.py`', '`gettext_noop`',
+                 'the catalog of the project wins', 'bazis.W005',
                  'never flush', 'cache.clear()', "cache.delete_pattern('*')",
                  'the flush applies the declarations again', 'bazis.contrib.users.token',
                  'users.E002', 'UserLanguageMixin'):

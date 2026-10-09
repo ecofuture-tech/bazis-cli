@@ -167,7 +167,7 @@ def grade(project: Path, task: dict) -> list[Check]:
     checks.append(Check('expected Bazis packages', not missing, 'missing: ' + ', '.join(missing) if missing else ''))
 
     if task.get('language'):
-        checks.append(language_check(project, info, task['language']))
+        checks.append(language_check(project, info, task['language'], env))
 
     apps = local_apps(project)
     models = [m['model'] for m in info.get('models', []) if m['model'].split('.')[0] in apps]
@@ -222,10 +222,11 @@ def grade(project: Path, task: dict) -> list[Check]:
     return checks
 
 
-def language_check(project: Path, info: dict, language: str) -> Check:
+def language_check(project: Path, info: dict, language: str, env: dict) -> Check:
     """
     The product is in the language of its description and in English (`LANGUAGES`), the
-    first by default (`LANGUAGE_CODE`), with the catalog of the project compiled.
+    first by default (`LANGUAGE_CODE`), with the catalog of the project compiled and
+    complete: nothing untranslated or fuzzy (`bazis_messages status --check`).
     """
     settings = {s['name']: s.get('value') for s in info.get('settings', [])}
     codes = [code for code, _name in settings.get('LANGUAGES') or []]
@@ -237,6 +238,17 @@ def language_check(project: Path, info: dict, language: str) -> Check:
     catalog = f'locale/{language}/LC_MESSAGES/django.mo'
     if not [*project.glob(catalog), *project.glob(f'*/{catalog}')]:
         problems.append(f'no {catalog}')
+    status = run(project, ['manage.py', 'bazis_messages', 'status', '--check'], env)
+    if status.returncode != 0:
+        incomplete = {
+            code: len(it['untranslated']) + len(it['fuzzy'])
+            for code, it in (json_in(status.stdout) or {}).items()
+            if it['untranslated'] or it['fuzzy']
+        }
+        problems.append(
+            'catalogs incomplete: ' + ', '.join(f'{code} {count}' for code, count in incomplete.items())
+            if incomplete else f'bazis_messages status failed: {tail(status, 3)}'
+        )
     return Check(f'product in {language} and en', not problems, '; '.join(problems))
 
 

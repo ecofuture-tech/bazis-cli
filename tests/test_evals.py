@@ -40,23 +40,40 @@ def test_tasks_are_valid():
     assert any(t.get('language') for t in tasks)
 
 
-def test_language_check(tmp_path):
+def test_language_check(tmp_path, monkeypatch):
+    status = {'ru': {'catalogs': ['locale/ru/LC_MESSAGES/django.po'], 'total': 2, 'translated': 2,
+                     'untranslated': [], 'fuzzy': []}}
+    commands = []
+
+    def run_status(project, args, env):
+        commands.append(args)
+        incomplete = status['ru']['untranslated'] or status['ru']['fuzzy']
+        return subprocess.CompletedProcess(args, 1 if incomplete else 0, json.dumps(status), '')
+
+    monkeypatch.setattr(grade, 'run', run_status)
     info = {'settings': [
         {'name': 'LANGUAGES', 'value': [['ru', 'Русский'], ['en', 'English']]},
         {'name': 'LANGUAGE_CODE', 'value': 'ru'},
     ]}
-    check = grade.language_check(tmp_path, info, 'ru')
+    check = grade.language_check(tmp_path, info, 'ru', {})
     assert not check.passed and check.detail == 'no locale/ru/LC_MESSAGES/django.mo'
 
     catalog = tmp_path / 'shop' / 'locale' / 'ru' / 'LC_MESSAGES'
     catalog.mkdir(parents=True)
     (catalog / 'django.mo').write_bytes(b'')
-    assert grade.language_check(tmp_path, info, 'ru').passed
+    assert grade.language_check(tmp_path, info, 'ru', {}).passed
+    assert commands[-1] == ['manage.py', 'bazis_messages', 'status', '--check']
+
+    # an entry left untranslated or fuzzy by the agent
+    status['ru']['untranslated'] = [{'msgid': 'Open'}]
+    status['ru']['fuzzy'] = [{'msgid': 'Close', 'msgstr': 'Закрыть'}]
+    check = grade.language_check(tmp_path, info, 'ru', {})
+    assert not check.passed and check.detail == 'catalogs incomplete: ru 2'
 
     info = {'settings': [{'name': 'LANGUAGES', 'value': [['en', 'English']]},
                          {'name': 'LANGUAGE_CODE', 'value': 'en'}]}
-    check = grade.language_check(tmp_path, info, 'ru')
-    assert check.detail == "LANGUAGE_CODE is 'en'; LANGUAGES are ['en']"
+    check = grade.language_check(tmp_path, info, 'ru', {})
+    assert check.detail == "LANGUAGE_CODE is 'en'; LANGUAGES are ['en']; catalogs incomplete: ru 2"
 
 
 def test_json_in_output_with_other_lines():

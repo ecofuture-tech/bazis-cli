@@ -226,7 +226,9 @@ FastAPI and Pydantic.
   the catalogs of the project, `locale/<language>/LC_MESSAGES/django.po`, by `python
   manage.py bazis_messages`: `make`, the translations of what it lists as untranslated or
   fuzzy in `locale/translations.json` (kept), `apply locale/translations.json --check`.
-  Never edit the `.po` files with a script, never run `makemessages` yourself.
+  A msgid of the Bazis packages that the project translates itself (`bazis.W004`) is
+  declared with `gettext_noop` in `{name}/translations.py`. Never edit the `.po` files with
+  a script, never run `makemessages` yourself.
 '''
 
 AGENTS_MD_FRONTEND = '''

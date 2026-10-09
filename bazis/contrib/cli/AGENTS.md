@@ -26,8 +26,9 @@ Bazis. It is a tool for the developer's machine, not a dependency of a project.
   skeleton), and always in English: English msgids with `gettext_lazy`, the catalogs of
   the project `locale/<language>/LC_MESSAGES/django.po` made, filled and compiled by
   `manage.py bazis_messages` (`make`, the translations in `locale/translations.json`,
-  `apply`), the texts of the screens through `t()` of bazis-front, a `bazis.W004` or
-  `bazis.W005` (msgids of the packages) reported. The `tests/conftest.py` of the
+  `apply`; a msgid of the packages that `bazis.W004` names declared with `gettext_noop` in
+  `<project>/translations.py` and translated so too), the texts of the screens through
+  `t()` of bazis-front, a `bazis.W005` reported. The `tests/conftest.py` of the
   skeleton gives the cache keys of the tests a prefix of their own: the tests never flush
   the shared Redis; the pytest plugin of bazis-test-utils installs the triggers of the test
   database and `migrate` applies the declared roles and workflows, so it has no other

@@ -98,8 +98,8 @@ separate package `bazis-<name>`. A project installs only the packages it needs.
   own, and route the socket with `router.register('bazis.contrib.ws.router')` in the root
   router module.
 - A route set of bazis-permit that restricts its objects with its own `restrict_queryset`
-  (`FileUploadRouteSet` of bazis-uploadable, the routes of bazis-bg, their subclasses)
-  needs no `permit_public = True`, which says that the data of the route is public: set it
+  and applies it in its `get_queryset` (`FileUploadRouteSet` of bazis-uploadable, the
+  routes of bazis-bg, their subclasses) needs no `permit_public = True`, which says that the data of the route is public: set it
   only on a route whose data is public (`permit.W002` names the routes that restrict
   nothing).
 - A location is a `PointField` of `django.contrib.gis.db.models` (`geography=True` when the
@@ -147,13 +147,19 @@ English, the language of the msgids, is always one of them.
   `untranslated` or `fuzzy`), write the translations of those entries to
   `locale/translations.json` (`{"<language>": {"<msgid>": "<msgstr>"}}`, a plural with the
   list of its forms, as the guide of the core shows), then `apply locale/translations.json
-  --check` (it compiles the catalogs). Keep the JSON file in the project and add to it
-  after every `make`; keep the `.po` and the `.mo` files. Never write a script that edits
-  the `.po` files, never run `makemessages` or `compilemessages` yourself.
-- `bazis.W004` of `run_doctor` (two Bazis packages translate a msgid differently) and
-  `bazis.W005` (a language without the translations of the texts of a Bazis package) are
-  about msgids of the packages, not of the code of the project, which `bazis_messages`
-  does not take: report them in the summary, never add them to the `.po` files.
+  --check` (it compiles the catalogs). Remove from the file the msgids that `apply`
+  reports as `unknown` (no longer in the code). Keep the JSON file in the project and add
+  to it after every `make`; keep the `.po` and the `.mo` files. Never write a script that
+  edits the `.po` files, never run `makemessages` or `compilemessages` yourself.
+- `bazis_messages` needs GNU gettext (`xgettext`, `msgmerge`, `msgfmt`). Without it, say
+  in the summary that the catalogs were not made and that the user installs gettext; never
+  work around it (no `.po` or `.mo` written another way).
+- `bazis.W004` of `run_doctor` (two Bazis packages translate a msgid differently): the
+  project translates the msgid itself. Declare it in `<project>/translations.py` (the
+  package of the settings) with `gettext_noop` (`from django.utils.translation import
+  gettext_noop`), so that `make` keeps it, and translate it through `bazis_messages` like
+  the other texts: the catalog of the project wins. `bazis.W005` (a language without the
+  translations of the texts of a Bazis package): report it in the summary.
 """
 
 #: the rules of a project with a frontend made by bazis-front (Task.extra_rules)
