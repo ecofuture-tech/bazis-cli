@@ -84,13 +84,28 @@ def test_scaffold_refuses_a_bad_package_name(tmp_path):
         scaffold.write_files(tmp_path / 'x', 'json')
 
 
+#: the real `scaffold.create_database`, which the fixture `environment` replaces
+create_database = scaffold.create_database
+#: what the fake `scaffold.create_database` of the tests did
+DATABASE_CREATED = 'Created the database `library` on PostgreSQL localhost:5432.'
+
+
 @pytest.fixture(autouse=True)
 def environment(monkeypatch):
     """
-    Node.js is found unless a test says otherwise, and bazis-front is that of PyPI.
+    Node.js is found unless a test says otherwise, bazis-front is that of PyPI, and
+    `bazis new` creates no database (the calls of `create_database` are recorded).
     """
     monkeypatch.setattr(scaffold, 'node_problem', lambda: None)
     monkeypatch.delenv(scaffold.FRONTEND_REQUIREMENT_ENV, raising=False)
+    calls = []
+
+    def fake_create_database(directory, name, python=sys.executable):
+        calls.append((directory, name, python))
+        return DATABASE_CREATED
+
+    monkeypatch.setattr(scaffold, 'create_database', fake_create_database)
+    return calls
 
 
 def manage(directory: Path, *args: str) -> subprocess.CompletedProcess:
@@ -368,6 +383,101 @@ def test_create_venv_with_uv(tmp_path, monkeypatch):
     assert commands[1][refresh + 1] == 'bazis-front'
 
 
+def test_create_database(tmp_path):
+    """
+    The script runs in the directory of the project with its Python; its outcome, printed
+    as JSON, is what `bazis new` says to the user and the agent.
+    """
+    commands = []
+
+    def runner(stdout, stderr=''):
+        def run(command, **kwargs):
+            commands.append((command, kwargs['cwd']))
+            return subprocess.CompletedProcess(command, 0, stdout, stderr)
+
+        return run
+
+    def outcome(outcome, **extra):
+        result = {'name': 'shop', 'server': 'db:5432', 'outcome': outcome, **extra}
+        return create_database(tmp_path, 'shop', '/p/python', run=runner(json.dumps(result)))
+
+    assert outcome('created') == 'Created the database `shop` on PostgreSQL db:5432.'
+    command, cwd = commands[0]
+    assert command == ['/p/python', '-c', scaffold.CREATE_DATABASE_PY, 'shop'] and cwd == tmp_path
+    assert outcome('exists') == 'The database `shop` exists on PostgreSQL db:5432.'
+    unreachable = outcome('unreachable', detail='connection refused')
+    assert 'cannot be reached (connection refused)' in unreachable and 'not created' in unreachable
+    assert outcome('failed', detail='permission denied') == (
+        'The database `shop` was not created on PostgreSQL db:5432: permission denied'
+    )
+    assert 'not on PostgreSQL' in outcome('other')
+    # the script failed: its last error line
+    failed = create_database(tmp_path, 'shop', run=runner('', 'Traceback\nImportError: x'))
+    assert failed == 'The database of the project was not created: ImportError: x'
+
+    def broken(command, **kwargs):
+        raise subprocess.TimeoutExpired(command, 120)
+
+    assert 'was not created' in create_database(tmp_path, 'shop', run=broken)
+
+
+#: a PostgreSQL server with PostGIS for the test of the database of a project, `host:port`
+#: with the user `postgres` and the password `postgres`; without it the test is skipped
+TEST_POSTGRES = os.environ.get('BAZIS_CLI_TEST_POSTGRES', '')
+
+
+def project_database_env(monkeypatch, host: str, port: str, name: str) -> None:
+    """The settings of the database of a project in the environment, as a user may set them."""
+    for key in [k for k in os.environ if k.startswith('BS_DATABASES__')]:
+        monkeypatch.delenv(key)
+    for key, value in dict(HOST=host, PORT=port, NAME=name, USER='postgres',
+                           PASSWORD='postgres').items():
+        monkeypatch.setenv(f'BS_DATABASES__DEFAULT__{key}', value)
+
+
+def test_create_database_of_a_project_without_postgres(tmp_path, monkeypatch):
+    """
+    The real script with the settings of a project: a server that cannot be reached is
+    skipped with a message, `bazis new` goes on.
+    """
+    directory = tmp_path / 'shop'
+    scaffold.write_files(directory, 'shop')
+    project_database_env(monkeypatch, '127.0.0.1', '9', 'shop')
+
+    message = create_database(directory, 'shop')
+    assert message.startswith('PostgreSQL 127.0.0.1:9 cannot be reached ('), message
+    assert message.endswith('the database `shop` is not created.')
+
+
+@pytest.mark.skipif(not TEST_POSTGRES, reason='BAZIS_CLI_TEST_POSTGRES is not set')
+def test_create_database_of_a_project(tmp_path, monkeypatch):
+    """
+    The database of the settings of the project is created with PostGIS, once: the second
+    run finds it.
+    """
+    import psycopg
+
+    host, port = TEST_POSTGRES.rsplit(':', 1)
+    name = f'bazis_cli_test_{os.getpid()}'
+    directory = tmp_path / 'shop'
+    scaffold.write_files(directory, 'shop')
+    project_database_env(monkeypatch, host, port, name)
+    server = dict(host=host, port=port, user='postgres', password='postgres', autocommit=True)
+    try:
+        assert create_database(directory, 'shop') == (
+            f'Created the database `{name}` on PostgreSQL {host}:{port}.'
+        )
+        assert create_database(directory, 'shop') == (
+            f'The database `{name}` exists on PostgreSQL {host}:{port}.'
+        )
+        with psycopg.connect(dbname=name, **server) as database:
+            query = "SELECT 1 FROM pg_extension WHERE extname = 'postgis'"
+            assert database.execute(query).fetchone()
+    finally:
+        with psycopg.connect(dbname='postgres', **server) as database:
+            database.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+
+
 def test_requirements_are_the_latest_releases():
     """
     The skeleton requires at least the releases of the catalog of bazis-mcp, which its
@@ -492,7 +602,7 @@ async def test_without_a_terminal():
     assert isinstance(await allow.can_use_tool('WebFetch', {'url': 'x'}, None), PermissionResultAllow)
 
 
-def test_new(tmp_path, fake_agent, capsys):
+def test_new(tmp_path, fake_agent, capsys, environment):
     directory = tmp_path / 'library'
 
     code = main.main(['new', str(directory), 'A library catalog with loans', '--no-venv',
@@ -500,7 +610,10 @@ def test_new(tmp_path, fake_agent, capsys):
 
     assert code == 0
     assert (directory / 'library' / 'settings.py').is_file()
+    # the database of the project, with the Python of the CLI without .venv
+    assert environment == [(directory.resolve(), 'library', sys.executable)]
     prompt, options = fake_agent[0]
+    assert DATABASE_CREATED in prompt
     assert 'A library catalog with loans' in prompt
     assert options.cwd == str(directory.resolve())
     assert options.max_budget_usd == 5
@@ -511,6 +624,7 @@ def test_new(tmp_path, fake_agent, capsys):
     # the language of the product is that of the description
     assert 'the language of the description' in prompt and 'BS_LANGUAGE_CODE=<code>' in prompt
     assert 'BS_LANGUAGE_CODE=en\n' in (directory / 'project.env').read_text()
+    assert DATABASE_CREATED in out.out
     assert 'Reading the guide.' in out.out
     assert '> package_guide bazis' in out.out
     assert '> Bash .venv/bin/python manage.py check' in out.out
@@ -640,13 +754,16 @@ def test_new_with_an_unknown_language(tmp_path, fake_agent, capsys):
 def test_rules_of_the_packages_and_of_what_the_agent_leaves():
     """
     The minimum of a package is its latest release; temporary files stay in the project,
-    secrets stay out of the messages, and a database the agent creates is reported.
+    secrets stay out of the messages, the database of `bazis new` is kept (and one the
+    agent creates is reported).
     """
     rules = ' '.join(agent.RULES.split())
     for text in ('`<name>>=<catalog_version>` of `list_packages`',
                  'a package without a `catalog_version`, such as bazis-front, without a minimum',
                  '`.scratch/`', '`/tmp`',
-                 'also of the test users', '`E2E_PASSWORD`', 'create the local database',
+                 'also of the test users', '`E2E_PASSWORD`',
+                 'The database of `.env` is created by `bazis new`', 'Never drop or recreate it',
+                 'never delete or generate again the applied ones', 'CREATE EXTENSION postgis',
                  'what you created outside the files (such as the database)'):
         assert text in rules, text
     assert '.scratch/' in scaffold.GITIGNORE.splitlines()

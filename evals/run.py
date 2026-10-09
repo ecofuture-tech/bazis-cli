@@ -57,12 +57,12 @@ async def build(task: dict, project: Path, args) -> dict:
     frontend = task.get('frontend', False)
     # without --language: the agent finds the `language` of a task in its description
     scaffold.write_files(project, name, frontend=frontend)
-    scaffold.create_venv(project)
+    database = scaffold.create_database(project, name, scaffold.create_venv(project))
     started = time.monotonic()
     with (project.parent / f'{task["id"]}.log').open('w', encoding='utf-8') as log:
         result = await agent.run(
             agent.Task(
-                prompt=main.new_prompt(task['description'], name, frontend),
+                prompt=main.new_prompt(task['description'], name, frontend, database=database),
                 project_dir=project,
                 model=args.model,
                 effort=args.effort,

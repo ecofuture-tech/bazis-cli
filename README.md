@@ -41,8 +41,9 @@ bazis audit --fix
   (settings, root router, ASGI app), `project.env`, `.env` with a generated secret key,
   `requirements.txt`, `requirements-dev.txt`, `tests/`, `.mcp.json` and `AGENTS.md`. It
   creates `.venv` with Bazis and bazis-mcp (with uv if it is installed; `--no-venv` skips
-  it). Then the agent chooses the Bazis packages, creates the apps, models, routes,
-  migrations and tests, and runs the checks.
+  it) and the database of `.env` with PostGIS when PostgreSQL is reachable (else it says
+  so and goes on). Then the agent chooses the Bazis packages, creates the apps, models,
+  routes, migrations and tests, and runs the checks.
 - By default `bazis new` builds the whole product with its frontend, made by
   [bazis-front](https://github.com/ecofuture-tech/bazis-front): the specs of the product
   (`spec/`: roles, entities, workflows, access, scenarios, screens, design), the backend

@@ -31,6 +31,8 @@ python -m pytest tests -p no:cacheprovider
 ```
 
 The scaffold test of a product with a frontend runs only where bazis-front is installed.
+The test that creates the database of a project runs with `BAZIS_CLI_TEST_POSTGRES=host:port`
+(a PostgreSQL server with PostGIS, user and password `postgres`); it drops what it creates.
 `evals/` builds projects with the real agent (`python -m evals.run --budget N`); its task
 with a frontend also needs Node.js and, before the release of bazis-front,
 `BAZIS_FRONT_REQUIREMENT`.

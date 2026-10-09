@@ -251,6 +251,52 @@ guide is `frontend/AGENTS.md`). Node.js 22.12 or newer with npm is needed for th
 '''
 
 
+#: run by the Python of a project in its directory (`create_database`): creates the database
+#: of its settings (`.env`, the `BS_*` variables of the environment) when it is missing, with
+#: PostGIS for the PostGIS backend, and prints the outcome as a JSON object
+CREATE_DATABASE_PY = """\
+import json
+import os
+import sys
+
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', sys.argv[1] + '.settings')
+
+from django.conf import settings
+
+db = settings.DATABASES['default']
+result = {'name': db['NAME'], 'server': f"{db['HOST'] or 'localhost'}:{db['PORT'] or 5432}"}
+backend = db['ENGINE'].rsplit('.', 1)[-1]
+if backend not in ('postgresql', 'postgis'):
+    result['outcome'] = 'other'
+else:
+    import psycopg
+    from psycopg import sql
+
+    params = dict(host=db['HOST'], port=db['PORT'], user=db['USER'], password=db['PASSWORD'])
+    params = {k: v for k, v in params.items() if v}
+    try:
+        server = psycopg.connect(dbname='postgres', autocommit=True, connect_timeout=5, **params)
+    except psycopg.Error as err:
+        result.update(outcome='unreachable', detail=' '.join(str(err).split()))
+    else:
+        try:
+            with server:
+                query = 'SELECT 1 FROM pg_database WHERE datname = %s'
+                exists = server.execute(query, [db['NAME']]).fetchone() is not None
+                if not exists:
+                    server.execute(sql.SQL('CREATE DATABASE {}').format(sql.Identifier(db['NAME'])))
+            if backend == 'postgis':
+                with psycopg.connect(
+                    dbname=db['NAME'], autocommit=True, connect_timeout=5, **params
+                ) as database:
+                    database.execute('CREATE EXTENSION IF NOT EXISTS postgis')
+            result['outcome'] = 'exists' if exists else 'created'
+        except psycopg.Error as err:
+            result.update(outcome='failed', detail=' '.join(str(err).split()))
+print(json.dumps(result))
+"""
+
+
 class ScaffoldError(Exception):
     pass
 
@@ -430,3 +476,42 @@ def create_venv(directory: Path, run=subprocess.run) -> Path:
         if done.returncode:
             raise ScaffoldError(f'{" ".join(command)} failed:\n{done.stderr.strip()[-2000:]}')
     return python
+
+
+def create_database(directory: Path, name: str, python: Path | str = sys.executable,
+                    run=subprocess.run) -> str:
+    """
+    Creates the database of the project `name` as its settings say (`.env`, the `BS_*`
+    variables of the environment) when PostgreSQL is reachable and the database is
+    missing, with the extension PostGIS for the PostGIS backend (the default). `python`
+    runs the settings of the project: that of its `.venv`. Never fails: returns what was
+    done, or why nothing was, for the user and the agent.
+    """
+    not_created = 'The database of the project was not created'
+    try:
+        done = run(
+            [str(python), '-c', CREATE_DATABASE_PY, name],
+            cwd=directory.resolve(), capture_output=True, text=True, timeout=120,
+        )
+    except (OSError, subprocess.SubprocessError) as err:
+        return f'{not_created}: {err}'
+    try:
+        result = json.loads(done.stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        error = done.stderr.strip().splitlines()
+        return f'{not_created}: {error[-1] if error else "its script printed nothing"}'
+    database, server = f'`{result["name"]}`', f'PostgreSQL {result["server"]}'
+    match result['outcome']:
+        case 'created':
+            return f'Created the database {database} on {server}.'
+        case 'exists':
+            return f'The database {database} exists on {server}.'
+        case 'unreachable':
+            return (
+                f'{server} cannot be reached ({result["detail"]}): the database {database} '
+                'is not created.'
+            )
+        case 'failed':
+            return f'The database {database} was not created on {server}: {result["detail"]}'
+        case _:
+            return f'The database {database} is not on PostgreSQL: it is not created.'

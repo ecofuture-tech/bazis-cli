@@ -96,20 +96,26 @@ Follow the rules of the languages."""
 
 
 def new_prompt(
-    description: str, name: str, frontend: bool = False, language: str | None = None
+    description: str,
+    name: str,
+    frontend: bool = False,
+    language: str | None = None,
+    database: str | None = None,
 ) -> str:
     """
     The task of the agent of `bazis new` (also used by the evals): the backend, and with a
     `frontend` the whole product with its frontend made by bazis-front, in the `language`
-    of `--language`, else in the language of the description.
+    of `--language`, else in the language of the description; `database` is what
+    `scaffold.create_database` did.
     """
+    database = f'\n{database}\n' if database else ''
     skeleton = f"""\
 Build this Bazis project: {description}
 
 The skeleton is ready: the project package `{name}` (settings, root router, ASGI app in
 `{name}/main.py`), `project.env`, `.env`, `requirements.txt`, `tests/` (its `conftest.py`
 keeps the cache keys of the tests apart), and `.venv` with Bazis installed.
-
+{database}
 {language_step(language)}
 """
     if not frontend:
@@ -138,16 +144,19 @@ def new_task(args) -> agent.Task:
         )
     scaffold.write_files(directory, name, frontend=frontend, language=language or 'en')
     print(f'Created the project {name} in {directory}')
+    python = sys.executable  # the settings of the project need only Bazis
     if not args.no_venv:
         print('Installing the dependencies into .venv ...')
         try:
-            scaffold.create_venv(directory)
+            python = scaffold.create_venv(directory)
         except scaffold.ScaffoldError as err:
             raise scaffold.ScaffoldError(
                 f'{err}\nThe files of the project are written: create .venv and install '
                 f'requirements-dev.txt by hand, or delete {directory} and run bazis new again.'
             ) from err
-    prompt = new_prompt(args.description, name, frontend, language)
+    database = scaffold.create_database(directory, name, python)
+    print(database)
+    prompt = new_prompt(args.description, name, frontend, language, database)
     return _task(args, prompt, directory, frontend=frontend)
 
 

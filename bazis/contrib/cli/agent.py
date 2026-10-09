@@ -106,7 +106,11 @@ separate package `bazis-<name>`. A project installs only the packages it needs.
   secret, also of the test users, in your messages or the summary: say where it is set
   (such as `E2E_PASSWORD`). Never run git commands that change the repository (commit,
   push, reset): the user reviews and commits the changes.
-- You may create the local database of the project when it is missing; report it.
+- The database of `.env` is created by `bazis new` when PostgreSQL is reachable, with
+  PostGIS (the task says what it did). Never drop or recreate it: after the first
+  `migrate` add new migrations, never delete or generate again the applied ones. You may
+  create it when it is missing (`CREATE DATABASE`, then `CREATE EXTENSION postgis` in it);
+  report it.
 - End with a short summary: what you built or changed, the Bazis packages used, how to run
   it, what you created outside the files (such as the database), and what is left for the
   user.
