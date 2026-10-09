@@ -384,6 +384,26 @@ def test_requirements_are_the_latest_releases():
             assert version(minimum) >= version(released[name]['version']), requirement
 
 
+def test_bazis_is_required_as_bazis_front_requires_it():
+    """
+    The minimum of bazis of the skeleton is not older than that of bazis-front, which every
+    product installs: the agent never starts from a Bazis that bazis-front replaces.
+    """
+    pytest.importorskip('bazis.contrib.front')
+    import re
+    from importlib import metadata
+
+    def version(text):
+        return tuple(int(part) for part in text.split('.')[:3])
+
+    front = next(
+        match.group(1) for it in metadata.requires('bazis-front')
+        if (match := re.fullmatch(r'bazis\s*>=\s*([\d.]+)', it))
+    )
+    ours = next(it.split('>=')[1] for it in scaffold.REQUIREMENTS if it.startswith('bazis>='))
+    assert version(ours) >= version(front)
+
+
 def test_options_of_a_task_that_writes(tmp_path):
     options = agent.options(agent.Task('build', tmp_path, model='claude-sonnet-5-5'))
 
@@ -598,7 +618,9 @@ def test_rules_of_the_packages_and_of_what_the_agent_leaves():
     secrets stay out of the messages, and a database the agent creates is reported.
     """
     rules = ' '.join(agent.RULES.split())
-    for text in ('`<name>>=<catalog_version>` of `list_packages`', '`.scratch/`', '`/tmp`',
+    for text in ('`<name>>=<catalog_version>` of `list_packages`',
+                 'a package without a `catalog_version`, such as bazis-front, without a minimum',
+                 '`.scratch/`', '`/tmp`',
                  'also of the test users', '`E2E_PASSWORD`', 'create the local database',
                  'what you created outside the files (such as the database)'):
         assert text in rules, text

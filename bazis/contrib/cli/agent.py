@@ -65,7 +65,8 @@ separate package `bazis-<name>`. A project installs only the packages it needs.
 - The Python environment is `.venv` (`.venv/bin/python`, on Windows
   `.venv\\Scripts\\python.exe`); `installed_version` of `list_packages` is the version in it.
   Add a package to `requirements.txt` with its latest release as the minimum
-  (`<name>>=<catalog_version>` of `list_packages`), install it with
+  (`<name>>=<catalog_version>` of `list_packages`; a package without a `catalog_version`,
+  such as bazis-front, without a minimum, as its guide or the task says), install it with
   `.venv/bin/python -m pip install -r requirements.txt` and list its app in
   `BS_INSTALLED_APPS` of `project.env` when its guide says so.
 - After changing models run `.venv/bin/python manage.py makemigrations`. After every change
