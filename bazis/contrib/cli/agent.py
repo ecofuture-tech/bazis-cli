@@ -88,7 +88,10 @@ separate package `bazis-<name>`. A project installs only the packages it needs.
   declarations again, the other data of a test is created by the test or its fixtures.
 - The roles of bazis-permit (with their permission groups) are declared in `<app>/roles.py`
   and the statuses and transits of bazis-statusy in `<app>/workflow.py`, as their guides
-  show, never created by data migrations, commands or fixtures: `migrate` applies them.
+  show, never created by data migrations, commands or fixtures: `migrate` applies them. A
+  project whose data migrations already create them moves them into these modules and
+  keeps those migrations as history without effect (`operations = []`, their
+  dependencies kept): `migrate` takes over the existing rows.
 - With bazis-ws, publish from the code of a write with `notify(users, lambda user:
   notification(...))` and `publish_changed(item)` of `bazis.contrib.ws.messages` (after the
   commit, in the language of each user), never with a Redis client or `on_commit` of your

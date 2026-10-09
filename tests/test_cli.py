@@ -578,6 +578,7 @@ def test_the_rules_follow_the_released_stack():
     """
     rules = ' '.join(agent.RULES.split())
     for text in ('`<app>/roles.py`', '`<app>/workflow.py`', 'never created by data migrations',
+                 'keeps those migrations as history without effect (`operations = []`',
                  '`django_db_setup`', 'notify(users, lambda user: notification(...))',
                  'publish_changed(item)', "router.register('bazis.contrib.ws.router')",
                  '`permit.W005`', '`statusy.W003`', '`bazis.database`'):
