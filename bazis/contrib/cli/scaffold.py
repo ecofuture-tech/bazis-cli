@@ -33,8 +33,8 @@ from pathlib import Path
 #: the packages of every project; the agent adds the Bazis packages the project needs. The
 #: minimums are the latest releases, not older than those of the catalog of bazis-mcp
 #: (tests/test_cli.py compares them), so that the guides describe the installed versions
-REQUIREMENTS = ['bazis>=2.13.0']
-REQUIREMENTS_DEV = ['bazis-mcp>=2.4.5', 'bazis-test-utils>=2.5.0']
+REQUIREMENTS = ['bazis>=2.15.0']
+REQUIREMENTS_DEV = ['bazis-mcp>=2.4.5', 'bazis-test-utils>=2.5.1']
 
 #: the frontend layer of a product (`bazis new` without `--no-frontend`)
 FRONTEND_REQUIREMENT = 'bazis-front>=0.1.0'
@@ -223,9 +223,10 @@ FastAPI and Pydantic.
   never flush it, their cache keys have a prefix of their own (`tests/conftest.py`).
 - The languages are `BS_LANGUAGES` and `BS_LANGUAGE_CODE` (`project.env`), English always
   among them: the texts of the code are English msgids (`gettext_lazy`), translated in
-  `locale/<language>/LC_MESSAGES/django.po` and compiled (`compilemessages`). Keep
-  `locale/`, even empty: `makemessages` writes into the first directory of `LOCALE_PATHS`,
-  which without it is the catalog of a package.
+  the catalogs of the project, `locale/<language>/LC_MESSAGES/django.po`, by `python
+  manage.py bazis_messages`: `make`, the translations of what it lists as untranslated or
+  fuzzy in `locale/translations.json` (kept), `apply locale/translations.json --check`.
+  Never edit the `.po` files with a script, never run `makemessages` yourself.
 '''
 
 AGENTS_MD_FRONTEND = '''
@@ -443,9 +444,6 @@ def write_files(
         'pytest.ini': PYTEST_INI.format(name=name),
         'tests/__init__.py': '',
         'tests/conftest.py': CONFTEST_PY.format(name=name),
-        # the catalogs of the project: the first of LOCALE_PATHS (the core lists it only when
-        # it exists), where `makemessages` writes; without it, into the catalog of a package
-        'locale/.gitkeep': '',
         '.mcp.json': json.dumps(
             {'mcpServers': {'bazis': {'command': f'{VENV_BIN}/bazis-mcp{EXE}', 'args': []}}},
             indent=2,

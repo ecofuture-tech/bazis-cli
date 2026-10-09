@@ -185,31 +185,32 @@ def test_scaffold_in_a_language(tmp_path):
     assert """BS_LANGUAGES='[["en", "English"]]'""" in env and 'BS_LANGUAGE_CODE=en\n' in env
 
 
-def test_makemessages_writes_into_the_catalog_of_the_project(tmp_path):
+def test_bazis_messages_keeps_the_catalogs_of_the_project(tmp_path):
     """
-    The skeleton has `locale/`, the first of LOCALE_PATHS, where `makemessages` writes the
-    msgids of the project; without it, the first is the catalog of an installed package.
+    The loop of the rules in a new project: `bazis_messages make` creates `locale/` and writes
+    the msgids of the project there (never into the catalog of a package), `apply` of
+    `locale/translations.json` fills and compiles it.
     """
     if shutil.which('xgettext') is None:
         pytest.skip('gettext is not installed')
     directory = tmp_path / 'shop'
     scaffold.write_files(directory, 'shop', language='ru')
-    assert (directory / 'locale' / '.gitkeep').is_file()
-
-    # checked before makemessages, which would otherwise change an installed package
-    done = manage(
-        directory, 'shell', '-c', 'from django.conf import settings; print(settings.LOCALE_PATHS[0])'
-    )
-    assert done.returncode == 0, done.stderr[-3000:]
-    assert os.path.realpath(done.stdout.split()[-1]) == os.path.realpath(directory / 'locale')
-
     (directory / 'shop' / 'texts.py').write_text(
         "from django.utils.translation import gettext_lazy as _\n\nTITLE = _('A text of the shop')\n"
     )
-    done = manage(directory, 'makemessages', '-l', 'ru')
+    done = manage(directory, 'bazis_messages', 'make')
     assert done.returncode == 0, done.stderr[-3000:]
-    catalog = directory / 'locale' / 'ru' / 'LC_MESSAGES' / 'django.po'
-    assert 'msgid "A text of the shop"' in catalog.read_text(encoding='utf-8')
+    status = json.loads(done.stdout)['ru']
+    assert status['catalogs'] == ['locale/ru/LC_MESSAGES/django.po']
+    assert {'msgid': 'A text of the shop'} in status['untranslated']
+
+    translations = {'ru': {it['msgid']: f'[{it["msgid"]}]' for it in status['untranslated']}}
+    (directory / 'locale' / 'translations.json').write_text(json.dumps(translations), encoding='utf-8')
+    done = manage(directory, 'bazis_messages', 'apply', 'locale/translations.json', '--check')
+    assert done.returncode == 0, done.stdout + done.stderr[-3000:]
+    catalog = directory / 'locale' / 'ru' / 'LC_MESSAGES'
+    assert 'msgstr "[A text of the shop]"' in (catalog / 'django.po').read_text(encoding='utf-8')
+    assert (catalog / 'django.mo').is_file()
 
 
 def test_tests_of_a_scaffold_keep_their_cache_keys_apart(tmp_path):
@@ -795,14 +796,34 @@ def test_rules_of_the_packages_and_of_what_the_agent_leaves():
     assert '.scratch/' in scaffold.GITIGNORE.splitlines()
 
 
+def test_rules_of_the_points_and_of_the_routes_that_restrict_themselves():
+    """
+    A location is a point of the core, near and sorted by the distance by the core; a route
+    that restricts its objects itself is not declared public (bazis-permit 2.10).
+    """
+    rules = ' '.join(agent.RULES.split())
+    for text in ('`PointField`', '`geography=True`', 'never two `FloatField`s',
+                 '`filter=<field>__near=<lon>,<lat>,5km`', '`sort=<field>__distance(<lon>,<lat>)`',
+                 'never by a distance computed in Python or SQL of your own',
+                 '`point_distance`/`point_within` of `bazis.core.utils.geo`',
+                 'needs no `permit_public = True`', '`FileUploadRouteSet` of bazis-uploadable',
+                 'the routes of bazis-bg', 'only on a route whose data is public'):
+        assert text in rules, text
+
+
 def test_rules_of_the_languages_and_the_tests():
     rules = ' '.join(agent.RULES.split())
     for text in ('gettext_lazy', 'English msgids', 'locale/<language>/LC_MESSAGES/django.po',
-                 'makemessages', 'compilemessages', 'bazis.W004', 'bazis.W005',
+                 'manage.py bazis_messages`, run in the project root', '`locale/translations.json`',
+                 '`apply locale/translations.json --check`', 'Keep the JSON file in the project',
+                 'Never write a script that edits the `.po` files',
+                 'never run `makemessages` or `compilemessages` yourself',
+                 'bazis.W004', 'bazis.W005', 'never add them to the `.po` files',
                  'never flush', 'cache.clear()', "cache.delete_pattern('*')",
                  'the flush applies the declarations again', 'bazis.contrib.users.token',
                  'users.E002', 'UserLanguageMixin'):
         assert text in rules, text
+    assert 'makemessages -l' not in rules and 'django-admin compilemessages' not in rules
     frontend = ' '.join(agent.FRONTEND_RULES.split())
     for text in ('t()', 'frontend/src/i18n/<language>.ts', '`languages` and `language`'):
         assert text in frontend, text

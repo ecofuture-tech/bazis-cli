@@ -41,7 +41,7 @@ text = "the contract and the end-to-end tests of the frontend need a migrated Po
 text = "bazis new creates the database of .env (with PostGIS) when PostgreSQL is reachable, else it says so and goes on: start PostgreSQL first, or create the database before the agent migrates; an existing database with tables is reported as another project's: set another BS_DATABASES__DEFAULT__NAME in .env"
 
 [[pitfalls]]
-text = "a product is in the language of its description and in English; bazis new --language CODE chooses the language instead of the agent"
+text = "a product is in the language of its description and in English; bazis new --language CODE chooses the language instead of the agent; the agent keeps the catalogs of the project with manage.py bazis_messages (make, locale/translations.json, apply), which needs GNU gettext"
 
 [[pitfalls]]
 text = "BAZIS_FRONT_REQUIREMENT replaces the requirement of bazis-front in requirements.txt of a new product (a path to a wheel or a checkout, or a URL) to try a bazis-front that is not on PyPI"

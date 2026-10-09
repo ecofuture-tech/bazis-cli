@@ -8,7 +8,7 @@ Bazis. It is a tool for the developer's machine, not a dependency of a project.
 
 - `bazis new DIR "what the product does"` writes the skeleton of a project (package with
   settings, root router and ASGI app, `project.env`, `.env` with a generated secret key,
-  `requirements*.txt`, `tests/`, `locale/`, `.mcp.json`, `AGENTS.md`), creates `.venv` with Bazis and
+  `requirements*.txt`, `tests/`, `.mcp.json`, `AGENTS.md`), creates `.venv` with Bazis and
   bazis-mcp (`--no-venv` skips it) and the database of the settings of the project (`.env`,
   the `BS_DATABASES__DEFAULT__*` variables) with the extension PostGIS when PostgreSQL is
   reachable and the database is missing (it says when it cannot, when PostGIS could not be
@@ -23,9 +23,11 @@ Bazis. It is a tool for the developer's machine, not a dependency of a project.
   22.12 or newer with npm (checked before anything is written); `--no-frontend` builds
   only the backend. The product is in the language of the description (the agent sets
   `BS_LANGUAGES` and `BS_LANGUAGE_CODE`) or of `--language CODE` (written by the
-  skeleton), and always in English: English msgids with `gettext_lazy`, the catalog
-  `locale/<language>/LC_MESSAGES/django.po` compiled, the texts of the screens through
-  `t()` of bazis-front, `bazis.W004` and `bazis.W005` clean. The `tests/conftest.py` of the
+  skeleton), and always in English: English msgids with `gettext_lazy`, the catalogs of
+  the project `locale/<language>/LC_MESSAGES/django.po` made, filled and compiled by
+  `manage.py bazis_messages` (`make`, the translations in `locale/translations.json`,
+  `apply`), the texts of the screens through `t()` of bazis-front, a `bazis.W004` or
+  `bazis.W005` (msgids of the packages) reported. The `tests/conftest.py` of the
   skeleton gives the cache keys of the tests a prefix of their own: the tests never flush
   the shared Redis; the pytest plugin of bazis-test-utils installs the triggers of the test
   database and `migrate` applies the declared roles and workflows, so it has no other

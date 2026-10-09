@@ -97,6 +97,18 @@ separate package `bazis-<name>`. A project installs only the packages it needs.
   commit, in the language of each user), never with a Redis client or `on_commit` of your
   own, and route the socket with `router.register('bazis.contrib.ws.router')` in the root
   router module.
+- A route set of bazis-permit that restricts its objects with its own `restrict_queryset`
+  (`FileUploadRouteSet` of bazis-uploadable, the routes of bazis-bg, their subclasses)
+  needs no `permit_public = True`, which says that the data of the route is public: set it
+  only on a route whose data is public (`permit.W002` names the routes that restrict
+  nothing).
+- A location is a `PointField` of `django.contrib.gis.db.models` (`geography=True` when the
+  product measures distances, for the index of the distances), never two `FloatField`s.
+  What is near is filtered and sorted by the core, `filter=<field>__near=<lon>,<lat>,5km`
+  and `sort=<field>__distance(<lon>,<lat>)` with the point field in the LIST schema of the
+  route, never by a distance computed in Python or SQL of your own; a distance in the code
+  is `point_distance`/`point_within` of `bazis.core.utils.geo`, as the guide of the core
+  shows.
 - With bazis-users, the root router module imports `bazis.contrib.users.token` (the token
   endpoint) unless it registers the user routes (`users.E002`), and a user model of the
   project has `UserLanguageMixin`, so that the language of a user follows him.
@@ -128,17 +140,20 @@ English, the language of the msgids, is always one of them.
   f-string of them). No text in another language in the code; the names of the declared
   roles, statuses and transits are English msgids too, which `migrate` translates into the
   column of each language with the catalog of the project.
-- Translate them into every other language in the catalog of the project,
-  `locale/<language>/LC_MESSAGES/django.po` (the directory `locale/` stays, even empty):
-  run `.venv/bin/python manage.py makemessages -l <language> --ignore frontend --ignore
-  static --ignore media`, fill every msgstr, then compile only the catalogs of the project
-  with `.venv/bin/django-admin compilemessages -l <language> --ignore .venv --ignore
-  frontend` (without the settings: `manage.py` would also compile the catalogs of the
-  packages in `.venv`); keep the `.po` and the `.mo` files.
-- `run_doctor` must report no `bazis.W004` (two catalogs translate a msgid differently)
-  and no `bazis.W005` (a language without the translations of the texts of a Bazis
-  package: translate those msgids in the catalog of the project, and add them again after
-  every `makemessages`, which marks the msgids that are not in the code obsolete).
+- Translate them into every other language in the catalogs of the project
+  (`locale/<language>/LC_MESSAGES/django.po` of the project and of its apps) with
+  `.venv/bin/python manage.py bazis_messages`, run in the project root: `make` (it creates
+  `locale/`, runs makemessages with the ignores of a project and prints what is
+  `untranslated` or `fuzzy`), write the translations of those entries to
+  `locale/translations.json` (`{"<language>": {"<msgid>": "<msgstr>"}}`, a plural with the
+  list of its forms, as the guide of the core shows), then `apply locale/translations.json
+  --check` (it compiles the catalogs). Keep the JSON file in the project and add to it
+  after every `make`; keep the `.po` and the `.mo` files. Never write a script that edits
+  the `.po` files, never run `makemessages` or `compilemessages` yourself.
+- `bazis.W004` of `run_doctor` (two Bazis packages translate a msgid differently) and
+  `bazis.W005` (a language without the translations of the texts of a Bazis package) are
+  about msgids of the packages, not of the code of the project, which `bazis_messages`
+  does not take: report them in the summary, never add them to the `.po` files.
 """
 
 #: the rules of a project with a frontend made by bazis-front (Task.extra_rules)
