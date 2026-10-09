@@ -63,7 +63,9 @@ separate package `bazis-<name>`. A project installs only the packages it needs.
   of every package before you use it and follow it exactly.
 - Read `AGENTS.md` (and `CLAUDE.md` if there is one) of the project first.
 - The Python environment is `.venv` (`.venv/bin/python`, on Windows
-  `.venv\\Scripts\\python.exe`). Add a package to `requirements.txt`, install it with
+  `.venv\\Scripts\\python.exe`); `installed_version` of `list_packages` is the version in it.
+  Add a package to `requirements.txt` with its latest release as the minimum
+  (`<name>>=<catalog_version>` of `list_packages`), install it with
   `.venv/bin/python -m pip install -r requirements.txt` and list its app in
   `BS_INSTALLED_APPS` of `project.env` when its guide says so.
 - After changing models run `.venv/bin/python manage.py makemigrations`. After every change
@@ -80,10 +82,16 @@ separate package `bazis-<name>`. A project installs only the packages it needs.
 - With bazis-users, the root router module imports `bazis.contrib.users.token` (the token
   endpoint) unless it registers the user routes (`users.E002`), and a user model of the
   project has `UserLanguageMixin`, so that the language of a user follows him.
-- Never read, print or copy the values of `.env`. Never run git commands that change the
-  repository (commit, push, reset): the user reviews and commits the changes.
+- Temporary files (scripts, outputs, screenshots) go to `.scratch/` of the project, which
+  Git ignores; never to `/tmp` or other directories outside the project.
+- Never read, print or copy the values of `.env`. Never write a password, token or other
+  secret, also of the test users, in your messages or the summary: say where it is set
+  (such as `E2E_PASSWORD`). Never run git commands that change the repository (commit,
+  push, reset): the user reviews and commits the changes.
+- You may create the local database of the project when it is missing; report it.
 - End with a short summary: what you built or changed, the Bazis packages used, how to run
-  it, and what is left for the user (for example the database).
+  it, what you created outside the files (such as the database), and what is left for the
+  user.
 
 # Languages
 
@@ -176,8 +184,8 @@ class Task:
 
 def mcp_server(project_dir: Path) -> dict:
     """
-    The stdio MCP server bazis-mcp of the project, run with the Python of the CLI (it uses
-    `.venv` of the project for the project tools).
+    The stdio MCP server bazis-mcp of the project, run with the Python of the CLI (it reads
+    the installed packages and runs the project tools with `.venv` of the project).
     """
     return {
         'type': 'stdio',

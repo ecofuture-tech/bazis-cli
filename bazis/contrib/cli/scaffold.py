@@ -30,8 +30,10 @@ import sys
 from pathlib import Path
 
 
-#: the packages of every project; the agent adds the Bazis packages the project needs
-REQUIREMENTS = ['bazis>=2.8.0']
+#: the packages of every project; the agent adds the Bazis packages the project needs. The
+#: minimums are the latest releases, not older than those of the catalog of bazis-mcp
+#: (tests/test_cli.py compares them), so that the guides describe the installed versions
+REQUIREMENTS = ['bazis>=2.11.0']
 REQUIREMENTS_DEV = ['bazis-mcp>=2.4.5', 'bazis-test-utils>=2.4.0']
 
 #: the frontend layer of a product (`bazis new` without `--no-frontend`)
@@ -148,6 +150,7 @@ BS_CACHES__DEFAULT__LOCATION=redis://localhost:6379/0
 
 GITIGNORE = '''.env
 .venv/
+.scratch/
 __pycache__/
 *.pyc
 .pytest_cache/
@@ -205,6 +208,8 @@ FastAPI and Pydantic.
 - The MCP server `bazis` (`.mcp.json`) gives the catalog and the guides of the Bazis
   packages and the facts and checks of this project. Read the guide of a package before
   using it, and run `python manage.py bazis_doctor` and the tests after every change.
+- Temporary files (scripts, outputs, screenshots) go to `.scratch/` (ignored by Git), not
+  to `/tmp`.
 - PostgreSQL with PostGIS and Redis are required to run the project and the tests
   (`.env`); the checks and `makemigrations` work without them. The tests share Redis: they
   never flush it, their cache keys have a prefix of their own (`tests/conftest.py`).
@@ -393,10 +398,17 @@ def create_venv(directory: Path, run=subprocess.run) -> Path:
     python = venv / ('Scripts/python.exe' if sys.platform == 'win32' else 'bin/python')
     uv = shutil.which('uv')
     if uv:
+        # a bazis-front from FRONTEND_REQUIREMENT_ENV, such as a checkout, is built again:
+        # uv keeps the build of a directory until its pyproject.toml changes, so it would
+        # install an older commit (pip builds a directory at every install)
+        refresh = (
+            ['--refresh-package', 'bazis-front']
+            if frontend_requirement() != FRONTEND_REQUIREMENT else []
+        )
         commands = [
             # --seed installs pip, which the agent uses to add packages
             [uv, 'venv', '--quiet', '--seed', '--python', sys.executable, str(venv)],
-            [uv, 'pip', 'install', '--quiet', '--python', str(python),
+            [uv, 'pip', 'install', '--quiet', *refresh, '--python', str(python),
              '-r', str(directory / 'requirements-dev.txt')],
         ]
     else:

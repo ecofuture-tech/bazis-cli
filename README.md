@@ -98,4 +98,4 @@ cd frontend && E2E_PASSWORD=... npm run e2e
 
 To try a bazis-front that is not on PyPI yet, point `BAZIS_FRONT_REQUIREMENT` to a wheel,
 a checkout or a URL: it replaces the requirement of bazis-front in `requirements.txt` of
-the new product.
+the new product, and uv builds it again instead of reusing the build of an older commit.

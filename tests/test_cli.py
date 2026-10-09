@@ -126,6 +126,9 @@ def test_scaffold_is_a_working_project(tmp_path):
 
     assert doctor(directory) == []
     assert (directory / '.gitignore').read_text().startswith('.env\n')
+    # the temporary files of the agent
+    assert '.scratch/' in (directory / '.gitignore').read_text().splitlines()
+    assert '`.scratch/`' in (directory / 'AGENTS.md').read_text()
     assert 'BS_SECRET_KEY=' in (directory / '.env').read_text()
     assert json.loads((directory / '.mcp.json').read_text())['mcpServers']['bazis']
 
@@ -337,6 +340,50 @@ def test_create_venv_with_pip(tmp_path, monkeypatch):
     assert commands[1][-1] == str(tmp_path / 'requirements-dev.txt')
 
 
+def test_create_venv_with_uv(tmp_path, monkeypatch):
+    """
+    A bazis-front from FRONTEND_REQUIREMENT_ENV (a checkout) is built again, not taken from
+    the cache of uv, which keeps the build of an older commit; the released one is not.
+    """
+    monkeypatch.setattr(scaffold.shutil, 'which', lambda name: '/usr/bin/uv')
+    commands = []
+
+    def run(command, **kwargs):
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 0, '', '')
+
+    monkeypatch.delenv(scaffold.FRONTEND_REQUIREMENT_ENV, raising=False)
+    python = scaffold.create_venv(tmp_path, run=run)
+    assert commands[0][:3] == ['/usr/bin/uv', 'venv', '--quiet']
+    assert commands[1][:3] == ['/usr/bin/uv', 'pip', 'install']
+    assert commands[1][-2:] == ['-r', str(tmp_path / 'requirements-dev.txt')]
+    assert str(python) in commands[1]
+    assert '--refresh-package' not in commands[1]
+
+    commands.clear()
+    monkeypatch.setenv(scaffold.FRONTEND_REQUIREMENT_ENV, '/src/bazis-front')
+    scaffold.create_venv(tmp_path, run=run)
+    refresh = commands[1].index('--refresh-package')
+    assert commands[1][refresh + 1] == 'bazis-front'
+
+
+def test_requirements_are_the_latest_releases():
+    """
+    The skeleton requires at least the releases of the catalog of bazis-mcp, which its
+    guides describe: an agent never starts from an older Bazis.
+    """
+    from bazis.contrib.mcp import catalog
+
+    def version(text):
+        return tuple(int(part) for part in text.split('.')[:3])
+
+    released = catalog.catalog()
+    for requirement in [*scaffold.REQUIREMENTS, *scaffold.REQUIREMENTS_DEV]:
+        name, minimum = requirement.split('>=')
+        if name in released:
+            assert version(minimum) >= version(released[name]['version']), requirement
+
+
 def test_options_of_a_task_that_writes(tmp_path):
     options = agent.options(agent.Task('build', tmp_path, model='claude-sonnet-5-5'))
 
@@ -543,6 +590,19 @@ def test_new_with_an_unknown_language(tmp_path, fake_agent, capsys):
     assert 'not a language of Django' in capsys.readouterr().err
     assert not directory.exists()
     assert fake_agent == []
+
+
+def test_rules_of_the_packages_and_of_what_the_agent_leaves():
+    """
+    The minimum of a package is its latest release; temporary files stay in the project,
+    secrets stay out of the messages, and a database the agent creates is reported.
+    """
+    rules = ' '.join(agent.RULES.split())
+    for text in ('`<name>>=<catalog_version>` of `list_packages`', '`.scratch/`', '`/tmp`',
+                 'also of the test users', '`E2E_PASSWORD`', 'create the local database',
+                 'what you created outside the files (such as the database)'):
+        assert text in rules, text
+    assert '.scratch/' in scaffold.GITIGNORE.splitlines()
 
 
 def test_rules_of_the_languages_and_the_tests():
