@@ -414,6 +414,13 @@ def test_create_database(tmp_path):
         'The database `shop` exists on PostgreSQL db:5432 without tables, but PostGIS is not '
         'installed in it: permission denied'
     )
+    # it exists but could not be opened: not presented as empty, not ready
+    uninspected = outcome('uninspected', detail='permission denied for database "shop"')
+    assert uninspected.startswith(
+        'The database `shop` exists on PostgreSQL db:5432 but could not be inspected: '
+        'permission denied for database "shop".'
+    )
+    assert 'without tables' not in uninspected and 'not ready' in uninspected
     # tables of another project: not the database of this one
     has_data = outcome('has_data')
     assert has_data.startswith('The database `shop` on PostgreSQL db:5432 already has data')
@@ -781,7 +788,8 @@ def test_rules_of_the_packages_and_of_what_the_agent_leaves():
                  'also of the test users', '`E2E_PASSWORD`',
                  'The database of `.env` is created by `bazis new`', 'Never drop or recreate it',
                  'never delete or generate again the applied ones', 'CREATE EXTENSION postgis',
-                 'already has data of another project', 'never migrate it',
+                 'already has data of another project or could not be inspected',
+                 'it is not ready', 'never migrate it',
                  'what you created outside the files (such as the database)'):
         assert text in rules, text
     assert '.scratch/' in scaffold.GITIGNORE.splitlines()

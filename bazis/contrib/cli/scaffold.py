@@ -254,8 +254,8 @@ guide is `frontend/AGENTS.md`). Node.js 22.12 or newer with npm is needed for th
 #: run by the Python of a project in its directory (`create_database`): creates the database
 #: of its settings (`.env`, the `BS_*` variables of the environment) when it is missing, with
 #: PostGIS for the PostGIS backend, and prints the outcome as a JSON object: `outcome`
-#: (`created`, `exists`, `has_data`: tables of another project, `unreachable`, `failed`,
-#: `other`: not PostgreSQL), `detail` (the error) and `postgis` (the error of the extension)
+#: (`created`, `exists`, `has_data`: tables of another project, `uninspected`: it exists but
+#: could not be opened, `unreachable`, `failed`, `other`: not PostgreSQL), `detail` (the error) and `postgis` (the error of the extension)
 CREATE_DATABASE_PY = """\
 import json
 import os
@@ -306,7 +306,9 @@ else:
                     except psycopg.Error as err:
                         result['postgis'] = ' '.join(str(err).split())
         except psycopg.Error as err:
-            if 'outcome' in result:
+            if result.get('outcome') == 'exists':
+                result.update(outcome='uninspected', detail=' '.join(str(err).split()))
+            elif 'outcome' in result:
                 result['detail'] = ' '.join(str(err).split())
             else:
                 result.update(outcome='failed', detail=' '.join(str(err).split()))
@@ -529,6 +531,12 @@ def create_database(directory: Path, name: str, python: Path | str = sys.executa
             return f'Created the database {database} on {server}{state}'
         case 'exists':
             return f'The database {database} exists on {server} without tables{state}'
+        case 'uninspected':
+            return (
+                f'The database {database} exists on {server} but could not be inspected: '
+                f'{result["detail"]}. It is not ready for this project: check the access to it, '
+                'or set another `BS_DATABASES__DEFAULT__NAME` in `.env`.'
+            )
         case 'has_data':
             return (
                 f'The database {database} on {server} already has data, probably of another '
