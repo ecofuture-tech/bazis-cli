@@ -110,11 +110,12 @@ def manage(directory: Path, *args: str) -> subprocess.CompletedProcess:
 
 def doctor(directory: Path) -> list:
     """
-    The messages of `bazis_doctor` of a project.
+    The warnings and errors of `bazis_doctor` of a project. Its infos are left out: without
+    the database, bazis 2.13 says that the database checks were skipped (`bazis.database`).
     """
     done = manage(directory, 'bazis_doctor', '--json')
     assert done.returncode == 0, done.stderr[-3000:]
-    return json.loads(done.stdout)
+    return [it for it in json.loads(done.stdout) if it['level'] not in ('info', 'debug')]
 
 
 def test_scaffold_is_a_working_project(tmp_path):
@@ -275,7 +276,7 @@ def test_scaffold_with_a_frontend_is_a_working_project(tmp_path):
     directory = tmp_path / 'shop'
     scaffold.write_files(directory, 'shop', frontend=True)
 
-    assert [m for m in doctor(directory) if m['level'] in ('error', 'critical', 'warning')] == []
+    assert doctor(directory) == []
 
 
 def node_version(stdout: str, returncode: int = 0):
