@@ -62,7 +62,10 @@ async def build(task: dict, project: Path, args) -> dict:
     with (project.parent / f'{task["id"]}.log').open('w', encoding='utf-8') as log:
         result = await agent.run(
             agent.Task(
-                prompt=main.new_prompt(task['description'], name, frontend, database=database),
+                prompt=main.new_prompt(
+                    task['description'], name, frontend, database=database,
+                    ports=scaffold.project_ports(project),
+                ),
                 project_dir=project,
                 model=args.model,
                 effort=args.effort,

@@ -33,13 +33,14 @@ from . import __version__, agent, scaffold
 
 #: the order of the work on a product with a frontend made by bazis-front
 FRONTEND_STEPS = """\
-1. Read the guides of the core and of bazis-front (`package_guide("bazis-front")`), choose
-   the Bazis packages the product needs (`list_packages`; the frontend logs in with
-   bazis-users, roles and access need bazis-permit, statuses and transits bazis-statusy,
-   files bazis-uploadable), install them and list their apps. Then create the frontend
-   with `.venv/bin/python manage.py bazis_front init` (`--preset portal` for a product for
-   the public, `workspace` for the staff): it writes `frontend/` and the starters of
-   `spec/`.
+1. Read the introductions of the guides of the core and of bazis-front
+   (`package_guide("bazis")`, `package_guide("bazis-front")`) and the titles of their
+   sections, choose the Bazis packages the product needs (`list_packages`; the frontend
+   logs in with bazis-users, roles and access need bazis-permit, statuses and transits
+   bazis-statusy, files bazis-uploadable), install them and list their apps. Then create
+   the frontend with `.venv/bin/python manage.py bazis_front init` (`--preset portal` for a
+   product for the public, `workspace` for the staff): it writes `frontend/` and the
+   starters of `spec/`.
 2. Describe the product in `spec/product.yaml` from {source}: the roles (each with its
    permit role and a `test_user`), the entities with their fields, the workflows of the
    entities with statuses, the access of each role, and scenarios for the main tasks of
@@ -67,11 +68,15 @@ FRONTEND_STEPS = """\
    the browser once (`npx playwright install chromium` in `frontend/`) and run them
    against the backend with its test data (`e2e_data`); fix the screens, the specs or the
    backend until they pass.
-9. Finish with `run_doctor`, the tests of the backend, `front_check` without errors,
-   `front_status` with nothing stale, and in `frontend/` `npx tsc --noEmit`,
-   `npm run lint`, `npm test` and `npm run build`. Say how to run the backend
-   (`.venv/bin/uvicorn {name}.main:app --port 8000`) and the frontend (`npm run dev` in
-   `frontend/`).
+9. Look at the screens once: with the backend and `npm run dev` running, take a
+   screenshot of each screen as a role that uses it (into `.scratch/`) and fix what is
+   visibly broken. One pass, no second round of screenshots.
+10. Finish with one run of the final checks: `run_doctor`, the tests of the backend,
+    `front_check` without errors, `front_status` with nothing stale, and in `frontend/`
+    `npx tsc --noEmit`, `npm run lint`, `npm test`, `npm run build`, and `npm run e2e`
+    if a screen changed since it passed. Say how to run the backend
+    (`.venv/bin/uvicorn {name}.main:app --port <backend>`) and the frontend
+    (`npm run dev -- --port <frontend>` in `frontend/`) with the ports of the project.
 """
 
 
@@ -95,34 +100,49 @@ description is not in English, first set there
 Follow the rules of the languages."""
 
 
+def ports_text(ports: dict[str, int]) -> str:
+    """
+    What a prompt says about the ports of the project (`scaffold.project_ports`).
+    """
+    return (
+        f'The ports of this project on this machine (`.bazis/ports.json`): the backend '
+        f'{ports["backend"]}, the dev server of the frontend {ports["frontend"]}, the dev '
+        f'server of the end-to-end tests {ports["e2e"]}.'
+    )
+
+
 def new_prompt(
     description: str,
     name: str,
     frontend: bool = False,
     language: str | None = None,
     database: str | None = None,
+    ports: dict[str, int] | None = None,
 ) -> str:
     """
     The task of the agent of `bazis new` (also used by the evals): the backend, and with a
     `frontend` the whole product with its frontend made by bazis-front, in the `language`
     of `--language`, else in the language of the description; `database` is what
-    `scaffold.create_database` did.
+    `scaffold.create_database` did, `ports` those of `scaffold.project_ports`.
     """
     database = f'\n{database}\n' if database else ''
+    ports = f'\n{ports_text(ports)}\n' if ports else ''
     skeleton = f"""\
 Build this Bazis project: {description}
 
 The skeleton is ready: the project package `{name}` (settings, root router, ASGI app in
 `{name}/main.py`), `project.env`, `.env`, `requirements.txt`, `tests/` (its `conftest.py`
 keeps the cache keys of the tests apart), and `.venv` with Bazis installed.
-{database}
+{database}{ports}
 {language_step(language)}
 """
     if not frontend:
         return skeleton + f"""
-Read the guide of the core (`package_guide("bazis")`), choose the Bazis packages the
-project needs with `list_packages`, read their guides, then create the apps with their
-models, routes, translations and tests, and register the routers in `{name}/router.py`.
+Read the introduction of the guide of the core (`package_guide("bazis")`), choose the
+Bazis packages the project needs with `list_packages`, read the introductions of their
+guides and the sections you need, then create the apps with their models, routes,
+translations and tests, and register the routers in `{name}/router.py`. Finish with one
+run of the final checks.
 """
     return skeleton + f"""
 bazis-front is in `requirements.txt` and `BS_INSTALLED_APPS`.
@@ -156,7 +176,8 @@ def new_task(args) -> agent.Task:
             ) from err
     database = scaffold.create_database(directory, name, python)
     print(database)
-    prompt = new_prompt(args.description, name, frontend, language, database)
+    ports = scaffold.project_ports(directory)
+    prompt = new_prompt(args.description, name, frontend, language, database, ports)
     return _task(args, prompt, directory, frontend=frontend)
 
 
@@ -200,6 +221,8 @@ components that need the capability of the package and copy those the screens ne
         source = 'the backend' + (' and what the project needs it for' if args.goal else '')
         steps = FRONTEND_STEPS.format(source=source, name='<project package>')
         prompt += f'\nThen build the frontend of the product in this order:\n\n{steps}'
+    if frontend:
+        prompt += f'\n{ports_text(scaffold.project_ports(project_dir))}\n'
     return _task(args, prompt, project_dir, frontend=frontend)
 
 
@@ -242,6 +265,8 @@ Audit this Bazis project.
 
 {action}
 """
+    if frontend and args.fix:
+        prompt += f'\n{ports_text(scaffold.project_ports(project_dir))}\n'
     return _task(args, prompt, project_dir, writes=args.fix, frontend=frontend)
 
 

@@ -8,8 +8,10 @@ Bazis. It is a tool for the developer's machine, not a dependency of a project.
 
 - `bazis new DIR "what the product does"` writes the skeleton of a project (package with
   settings, root router and ASGI app, `project.env`, `.env` with a generated secret key,
-  `requirements*.txt`, `tests/`, `.mcp.json`, `AGENTS.md`), creates `.venv` with Bazis and
-  bazis-mcp (`--no-venv` skips it) and the database of the settings of the project (`.env`,
+  `requirements*.txt`, `tests/`, `.mcp.json`, `AGENTS.md`, `.bazis/ports.json` with free
+  ports of this machine for the backend, the dev server of the frontend and that of the
+  end-to-end tests), creates `.venv` with Bazis and bazis-mcp (`--no-venv` skips it), raises
+  the minimums of the requirements to the installed releases (`X.Y.Z`) and the database of the settings of the project (`.env`,
   the `BS_DATABASES__DEFAULT__*` variables) with the extension PostGIS when PostgreSQL is
   reachable and the database is missing (it says when it cannot, when PostGIS could not be
   installed, and when an existing database has tables, probably of another project, and
@@ -41,6 +43,16 @@ Bazis. It is a tool for the developer's machine, not a dependency of a project.
 - `bazis audit [--fix]` reviews the project against the guides and checks of its packages
   and, with a frontend, `front_check`, `front_status` and the guides of bazis-front;
   without `--fix` the agent can only read (it lists the frontend commands it could not run).
+
+The agent reads the introduction of a guide and its sections when a step needs them, reads
+the sources of the packages only for a fact the guides lack, runs the final checks once
+(again only those that failed) and ends with a summary in fixed sections: Built, Packages,
+Run, Outside the files, Left for you, Guide gaps. The servers of a project use its ports
+of `.bazis/ports.json` (`frontend/.env.local` has `BAZIS_API_URL`), and its files go to
+`media/` and `static/` of the project (`BS_MEDIA_ROOT`, `BS_STATIC_ROOT` in `.env`).
+Every command writes the facts of its run to `.bazis/run.json`: the turns, the cost, the
+duration, the usage of the tokens and the calls of each tool. `.bazis/` ignores itself in
+Git.
 
 bazis-cli only orchestrates: the frontend logic (template, contract, specs, components,
 design, end-to-end tests) is in bazis-front and its `manage.py bazis_front` commands, the

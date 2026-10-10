@@ -25,6 +25,7 @@ import os
 import re
 import secrets
 import shutil
+import socket
 import subprocess
 import sys
 from pathlib import Path
@@ -32,7 +33,8 @@ from pathlib import Path
 
 #: the packages of every project; the agent adds the Bazis packages the project needs. The
 #: minimums are the latest releases, not older than those of the catalog of bazis-mcp
-#: (tests/test_cli.py compares them), so that the guides describe the installed versions
+#: (tests/test_cli.py compares them); `create_venv` raises them to the installed releases,
+#: whose guides the agent reads and whose API the project uses
 REQUIREMENTS = ['bazis>=2.15.0']
 REQUIREMENTS_DEV = ['bazis-mcp>=2.4.5', 'bazis-test-utils>=2.5.1']
 
@@ -45,6 +47,12 @@ FRONTEND_REQUIREMENT_ENV = 'BAZIS_FRONT_REQUIREMENT'
 #: the oldest Node.js of the frontend: `engines.node` of the template of bazis-front, which
 #: is a dependency of the project, not of the CLI (tests/test_cli.py compares them)
 NODE_VERSION = (22, 12)
+
+#: the local files of bazis-cli in a project, never committed (the directory ignores itself):
+#: `ports.json` (`project_ports`) and `run.json`, the facts of the last run of the agent
+LOCAL_DIR = '.bazis'
+#: the ports of the servers of a project on this machine (`project_ports`)
+PORTS = ('backend', 'frontend', 'e2e')
 
 
 MANAGE_PY = '''#!/usr/bin/env python
@@ -146,6 +154,9 @@ BS_DATABASES__DEFAULT__NAME={name}
 BS_DATABASES__DEFAULT__USER=postgres
 BS_DATABASES__DEFAULT__PASSWORD=postgres
 BS_CACHES__DEFAULT__LOCATION=redis://localhost:6379/0
+# the files of this project, not those of every project in /tmp
+BS_MEDIA_ROOT=__BASE_DIR__/media
+BS_STATIC_ROOT=__BASE_DIR__/static
 '''
 
 GITIGNORE = '''.env
@@ -217,7 +228,8 @@ FastAPI and Pydantic.
   packages and the facts and checks of this project. Read the guide of a package before
   using it, and run `python manage.py bazis_doctor` and the tests after every change.
 - Temporary files (scripts, outputs, screenshots) go to `.scratch/` (ignored by Git), not
-  to `/tmp`.
+  to `/tmp`. `.bazis/` (not committed) has the ports of the servers of the project on this
+  machine (`ports.json`) and the facts of the last run of the `bazis` command (`run.json`).
 - PostgreSQL with PostGIS and Redis are required to run the project and the tests
   (`.env`); the checks and `makemigrations` work without them. The tests share Redis: they
   never flush it, their cache keys have a prefix of their own (`tests/conftest.py`).
@@ -250,7 +262,8 @@ guide is `frontend/AGENTS.md`). Node.js 22.12 or newer with npm is needed for th
   bazis-front): the test users of the roles of the specs, with the password of
   `E2E_PASSWORD`, and the records the scenarios need.
 - In `frontend/`: `npx tsc --noEmit`, `npm run lint`, `npm test`, and `npm run e2e` against
-  the running backend with that test data.
+  the running backend with that test data, on the ports of `.bazis/ports.json`
+  (`BAZIS_API_URL` of `frontend/.env.local`, `E2E_PORT`).
 '''
 
 
@@ -317,6 +330,28 @@ else:
                 result.update(outcome='failed', detail=' '.join(str(err).split()))
 print(json.dumps(result))
 """
+
+
+#: run by the Python of a project (`create_venv`): prints the installed versions of the
+#: distributions named in its arguments as a JSON object
+INSTALLED_VERSIONS_PY = """\
+import json
+import sys
+from importlib import metadata
+
+versions = {}
+for name in sys.argv[1:]:
+    try:
+        versions[name] = metadata.version(name)
+    except metadata.PackageNotFoundError:
+        pass
+print(json.dumps(versions))
+"""
+
+#: a requirement with a minimum, as the skeleton writes them
+MINIMUM_RE = re.compile(r'([A-Za-z0-9][A-Za-z0-9._-]*)>=(\d+(?:\.\d+)*)')
+#: a PEP 440 version as installed: the release, a pre-release, a post-release, a dev release
+VERSION_RE = re.compile(r'(\d+(?:\.\d+)*)((?:a|b|rc)\d+)?(\.post\d+)?(\.dev\d+)?(\+\S+)?')
 
 
 class ScaffoldError(Exception):
@@ -407,14 +442,93 @@ def languages(code: str) -> list[list[str]]:
     return result
 
 
+def release(version: str) -> str | None:
+    """
+    The release `X.Y.Z` of an installed version that satisfies it as a minimum: `2.16.0` of
+    `2.16.0` and of a build after it (`2.16.0.post1.dev3`, `2.16.0+local`); None for a
+    version before its release (`2.16.0rc1`, `2.16.0.dev3`) or that is not PEP 440.
+    """
+    match = VERSION_RE.fullmatch(version.strip())
+    if not match or match[2] or (match[4] and not match[3]):
+        return None
+    return match[1]
+
+
+def _numbers(version: str) -> tuple[int, ...]:
+    numbers = tuple(int(part) for part in version.split('.'))
+    return numbers + (0,) * (3 - len(numbers))
+
+
+def require_installed(directory: Path, versions: dict[str, str]) -> None:
+    """
+    Raises the minimums of `requirements.txt` and `requirements-dev.txt` to the releases of
+    the installed `versions`: the guides that the agent reads and the API the project uses
+    are those of the installed packages, never older ones. Other lines are kept.
+    """
+    for file in ('requirements.txt', 'requirements-dev.txt'):
+        path = directory / file
+        lines = path.read_text(encoding='utf-8').splitlines()
+        for i, line in enumerate(lines):
+            if not (match := MINIMUM_RE.fullmatch(line.strip())):
+                continue
+            name, minimum = match.groups()
+            installed = release(versions.get(name, ''))
+            if installed and _numbers(installed) > _numbers(minimum):
+                lines[i] = f'{name}>={installed}'
+        path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+
+
+def free_ports(count: int) -> list[int]:
+    """
+    `count` different ports free on this machine now.
+    """
+    sockets = []
+    try:
+        for _ in range(count):
+            sock = socket.socket()
+            sockets.append(sock)
+            sock.bind(('127.0.0.1', 0))
+        return [sock.getsockname()[1] for sock in sockets]
+    finally:
+        for sock in sockets:
+            sock.close()
+
+
+def local_dir(directory: Path) -> Path:
+    """
+    The local directory of bazis-cli in a project (LOCAL_DIR), created ignored by Git.
+    """
+    path = directory / LOCAL_DIR
+    path.mkdir(parents=True, exist_ok=True)
+    (path / '.gitignore').write_text('*\n', encoding='utf-8')
+    return path
+
+
+def project_ports(directory: Path) -> dict[str, int]:
+    """
+    The ports of the servers of a project on this machine: the backend (uvicorn), the dev
+    server of the frontend and that of its end-to-end tests. They are chosen free once, not
+    the defaults 8000 and 5173 that other projects use, and kept in `.bazis/ports.json`.
+    """
+    path = directory / LOCAL_DIR / 'ports.json'
+    try:
+        ports = json.loads(path.read_text(encoding='utf-8'))
+        return {name: int(ports[name]) for name in PORTS}
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    ports = dict(zip(PORTS, free_ports(len(PORTS)), strict=True))
+    (local_dir(directory) / 'ports.json').write_text(json.dumps(ports, indent=2) + '\n', encoding='utf-8')
+    return ports
+
+
 def write_files(
     directory: Path, name: str, frontend: bool = False, language: str = 'en'
 ) -> list[Path]:
     """
     Writes the skeleton of the project in a `language` (`LANGUAGE_CODE`, with English in
     `LANGUAGES`), with bazis-front in its requirements and apps when it has a `frontend`
-    (the agent creates the frontend itself with `bazis_front init`). Fails if the directory
-    has files already.
+    (the agent creates the frontend itself with `bazis_front init`), and chooses its ports
+    (`project_ports`). Fails if the directory has files already.
     """
     if directory.exists() and any(directory.iterdir()):
         raise ScaffoldError(f'{directory} is not empty')
@@ -458,12 +572,15 @@ def write_files(
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding='utf-8')
         written.append(path)
+    project_ports(directory)
+    written.append(directory / LOCAL_DIR / 'ports.json')
     return written
 
 
 def create_venv(directory: Path, run=subprocess.run) -> Path:
     """
-    Creates `.venv` with the dependencies of the project (with uv if it is installed) and
+    Creates `.venv` with the dependencies of the project (with uv if it is installed), raises
+    the minimums of its requirements to the installed releases (`require_installed`) and
     returns its Python.
     """
     directory = directory.resolve()  # the commands run in it
@@ -494,6 +611,18 @@ def create_venv(directory: Path, run=subprocess.run) -> Path:
         done = run(command, cwd=directory, capture_output=True, text=True)
         if done.returncode:
             raise ScaffoldError(f'{" ".join(command)} failed:\n{done.stderr.strip()[-2000:]}')
+    names = [
+        match[1] for file in ('requirements.txt', 'requirements-dev.txt')
+        for line in (directory / file).read_text(encoding='utf-8').splitlines()
+        if (match := MINIMUM_RE.fullmatch(line.strip()))
+    ]
+    done = run([str(python), '-c', INSTALLED_VERSIONS_PY, *names],
+               cwd=directory, capture_output=True, text=True)
+    try:
+        versions = json.loads(done.stdout)
+    except ValueError:
+        versions = {}  # the minimums of the skeleton stay
+    require_installed(directory, versions if isinstance(versions, dict) else {})
     return python
 
 

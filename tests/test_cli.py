@@ -147,6 +147,69 @@ def test_scaffold_is_a_working_project(tmp_path):
     assert '`.scratch/`' in (directory / 'AGENTS.md').read_text()
     assert 'BS_SECRET_KEY=' in (directory / '.env').read_text()
     assert json.loads((directory / '.mcp.json').read_text())['mcpServers']['bazis']
+    # the files of the project are its own, not those of every project in /tmp
+    assert 'BS_MEDIA_ROOT=__BASE_DIR__/media\n' in (directory / '.env').read_text()
+    done = manage(directory, 'shell', '-c',
+                  'from django.conf import settings; print(settings.MEDIA_ROOT, settings.STATIC_ROOT)')
+    roots = [Path(it).resolve() for it in done.stdout.splitlines()[-1].split()]
+    assert roots == [(directory / 'media').resolve(), (directory / 'static').resolve()], done.stderr
+    # the ports of the project, in its local directory that Git ignores
+    ports = json.loads((directory / '.bazis' / 'ports.json').read_text())
+    assert set(ports) == set(scaffold.PORTS) and len(set(ports.values())) == 3
+    assert (directory / '.bazis' / '.gitignore').read_text() == '*\n'
+    assert '`.bazis/`' in (directory / 'AGENTS.md').read_text()
+
+
+def test_project_ports(tmp_path):
+    """
+    The ports are chosen free once and kept; a missing or broken file is written again.
+    """
+    ports = scaffold.project_ports(tmp_path)
+    assert list(ports) == ['backend', 'frontend', 'e2e'] and 8000 not in ports.values()
+    assert scaffold.project_ports(tmp_path) == ports
+    (tmp_path / '.bazis' / 'ports.json').write_text('{"backend": 1}')
+    again = scaffold.project_ports(tmp_path)
+    assert set(again) == set(scaffold.PORTS)
+    assert json.loads((tmp_path / '.bazis' / 'ports.json').read_text()) == again
+
+
+def test_release():
+    """
+    The minimum a version satisfies: its release, also of a build after it; none of a
+    version before its release.
+    """
+    assert scaffold.release('2.16.0') == '2.16.0'
+    assert scaffold.release('2.15.1.post1.dev12') == '2.15.1'
+    assert scaffold.release('2.16.0+local') == '2.16.0'
+    for version in ('2.16.0rc1', '2.16.0.dev3', '2.15.1-12-gc4e2997 (clone)', ''):
+        assert scaffold.release(version) is None, version
+
+
+def test_requirements_are_raised_to_the_installed_releases(tmp_path, monkeypatch):
+    """
+    `create_venv` raises the minimums of the skeleton to the installed releases, numbers
+    only, never lowers them, and keeps the other lines.
+    """
+    monkeypatch.setenv(scaffold.FRONTEND_REQUIREMENT_ENV, '/src/bazis-front')
+    scaffold.write_files(tmp_path, 'shop', frontend=True)
+    installed = {
+        'bazis': '2.16.0.post1.dev4', 'bazis-mcp': '2.4.5rc1', 'bazis-test-utils': '2.0.0',
+    }
+
+    def run(command, **kwargs):
+        if command[1:3] == ['-c', scaffold.INSTALLED_VERSIONS_PY]:
+            assert set(command[3:]) == {'bazis', 'bazis-mcp', 'bazis-test-utils'}
+            return subprocess.CompletedProcess(command, 0, json.dumps(installed), '')
+        return subprocess.CompletedProcess(command, 0, '', '')
+
+    scaffold.create_venv(tmp_path, run=run)
+    assert (tmp_path / 'requirements.txt').read_text().splitlines() == [
+        'bazis>=2.16.0', '/src/bazis-front',
+    ]
+    # a pre-release does not satisfy its release, an older one does not lower the minimum
+    assert (tmp_path / 'requirements-dev.txt').read_text().splitlines() == [
+        '-r requirements.txt', *scaffold.REQUIREMENTS_DEV,
+    ]
 
 
 def test_product_language():
@@ -345,6 +408,7 @@ def test_scaffold_refuses_a_directory_with_files(tmp_path):
 
 
 def test_create_venv_with_pip(tmp_path, monkeypatch):
+    scaffold.write_files(tmp_path, 'shop')
     monkeypatch.setattr(scaffold.shutil, 'which', lambda name: None)
     monkeypatch.chdir(tmp_path.parent)
     commands = []
@@ -367,6 +431,7 @@ def test_create_venv_with_uv(tmp_path, monkeypatch):
     A bazis-front from FRONTEND_REQUIREMENT_ENV (a checkout) is built again, not taken from
     the cache of uv, which keeps the build of an older commit; the released one is not.
     """
+    scaffold.write_files(tmp_path, 'shop')
     monkeypatch.setattr(scaffold.shutil, 'which', lambda name: '/usr/bin/uv')
     commands = []
 
@@ -644,6 +709,8 @@ def test_new(tmp_path, fake_agent, capsys, environment):
     assert environment == [(directory.resolve(), 'library', sys.executable)]
     prompt, options = fake_agent[0]
     assert DATABASE_CREATED in prompt
+    ports = json.loads((directory / '.bazis' / 'ports.json').read_text())
+    assert main.ports_text(ports) in prompt
     assert 'A library catalog with loans' in prompt
     assert options.cwd == str(directory.resolve())
     assert options.max_budget_usd == 5
@@ -659,6 +726,11 @@ def test_new(tmp_path, fake_agent, capsys, environment):
     assert '> package_guide bazis' in out.out
     assert '> Bash .venv/bin/python manage.py check' in out.out
     assert '[3 turns, $0.50]' in out.err
+    # the facts of the run, for the measurements
+    facts = json.loads((directory / agent.RUN_FILE).read_text())
+    assert facts['turns'] == 3 and facts['cost_usd'] == 0.5 and facts['duration_ms'] == 1
+    assert facts['tools'] == {'package_guide': 1, 'Bash': 1}
+    assert facts['model'] == agent.DEFAULT_MODEL and facts['error'] is None
 
 
 def test_new_prompt_of_a_product():
@@ -666,15 +738,19 @@ def test_new_prompt_of_a_product():
     The prompt of a product with a frontend gives the order of the work of the guide of
     bazis-front, with its commands and the MCP tools.
     """
-    prompt = main.new_prompt('A help desk', 'helpdesk', frontend=True)
+    ports = {'backend': 8123, 'frontend': 5199, 'e2e': 5201}
+    prompt = main.new_prompt('A help desk', 'helpdesk', frontend=True, ports=ports)
 
     order = [
+        'backend 8123, the dev server of the frontend 5199, the dev server of the end-to-end tests 5201',
         'package_guide("bazis-front")', 'bazis_front init', 'spec/product.yaml',
         'spec/screens/', 'Make the backend satisfy the specs', 'e2e_data', 'manage.py migrate',
         'bazis_front contract', 'as each `hint` says', 'front_catalog', 'bazis_front add',
         'frontend/src/screens/', 'spec/design/', 'bazis_front design', 'bazis_front e2e',
-        'npx playwright install chromium', 'front_status', 'npx tsc --noEmit', 'npm run lint',
-        'npm test', 'npm run build', 'uvicorn helpdesk.main:app',
+        'npx playwright install chromium', 'Look at the screens once', 'One pass',
+        'one run of the final checks', 'front_status', 'npx tsc --noEmit', 'npm run lint',
+        'npm test', 'npm run build', 'uvicorn helpdesk.main:app --port <backend>',
+        'npm run dev -- --port <frontend>',
     ]
     positions = [prompt.index(text) for text in order]
     assert positions == sorted(positions)
@@ -682,6 +758,8 @@ def test_new_prompt_of_a_product():
         assert text in prompt
     assert 'A help desk' in prompt
     assert 'the description' in prompt
+    # the guides are read by sections, when a step needs them
+    assert 'introductions of the guides' in prompt and '8000' not in prompt
 
 
 def test_new_prompt_of_a_backend():
@@ -695,6 +773,16 @@ def test_frontend_rules():
                  'frontend/AGENTS.md', 'e2e_data', 'E2E_PASSWORD', 'npm run e2e',
                  'frontend/src/bazis/generated/', 'Node.js'):
         assert text in agent.FRONTEND_RULES
+    # the ports of the project, never the defaults; one attempt at a flaky test
+    rules = ' '.join(agent.FRONTEND_RULES.split())
+    for text in ('`.bazis/ports.json`', 'never the defaults 8000 and 5173',
+                 '`BAZIS_API_URL=http://localhost:<backend>` in `frontend/.env.local`',
+                 '`npm run dev -- --port <frontend>`', '--port <backend>',
+                 '`E2E_PORT=<e2e> E2E_PASSWORD=<the same password> npm run e2e`',
+                 'one attempt at a fix, then goes to Left for you',
+                 'read their introductions'):
+        assert text in rules, text
+    assert '--port 8000' not in rules
 
 
 def test_rules_and_steps_agree_on_the_test_data():
@@ -783,22 +871,43 @@ def test_new_with_an_unknown_language(tmp_path, fake_agent, capsys):
 
 def test_rules_of_the_packages_and_of_what_the_agent_leaves():
     """
-    The minimum of a package is its latest release; temporary files stay in the project,
-    secrets stay out of the messages, the database of `bazis new` is kept (and one the
-    agent creates is reported).
+    The minimum of a package is its installed release, in numbers; temporary files stay in
+    the project, secrets stay out of the messages, the database of `bazis new` is kept (and
+    one the agent creates is reported); the summary has fixed sections, with the gaps of
+    the guides.
     """
     rules = ' '.join(agent.RULES.split())
-    for text in ('`<name>>=<catalog_version>` of `list_packages`',
-                 'a package without a `catalog_version`, such as bazis-front, without a minimum',
+    for text in ('then give it its installed release as the minimum: `<name>>=X.Y.Z`',
+                 'without a suffix such as `.post1.dev3`',
+                 'A requirement that the task gives is written as it is', 'never lower a minimum',
                  '`.scratch/`', '`/tmp`',
                  'also of the test users', '`E2E_PASSWORD`',
                  'The database of `.env` is created by `bazis new`', 'Never drop or recreate it',
                  'never delete or generate again the applied ones', 'CREATE EXTENSION postgis',
                  'already has data of another project or could not be inspected',
                  'it is not ready', 'never migrate it',
-                 'what you created outside the files (such as the database)'):
+                 'Built (', 'Packages (', 'Run (', 'Outside the files (', 'such as the database',
+                 'Left for you (', 'Guide gaps (',
+                 'Run the final checks once, after the last change',
+                 'run again only the checks that failed'):
         assert text in rules, text
+    assert 'catalog_version' not in rules
     assert '.scratch/' in scaffold.GITIGNORE.splitlines()
+
+
+def test_rules_of_the_guides():
+    """
+    A guide is read by its introduction and the sections a step needs; the sources of the
+    packages only for a fact the guide lacks, named in the summary.
+    """
+    rules = ' '.join(agent.RULES.split())
+    for text in ('read the introduction, then a section (`package_guide(name, section)`) '
+                 'when a step needs it, never all of them in advance',
+                 'do not read the sources of its packages',
+                 '`frontend/src/bazis/` and `frontend/e2e/bazis/`',
+                 'Only when the guide lacks a fact you need, read the source',
+                 'name the gap in "Guide gaps" of the summary'):
+        assert text in rules, text
 
 
 def test_rules_of_the_points_and_of_the_routes_that_restrict_themselves():
@@ -868,6 +977,8 @@ def test_add_to_a_product_with_a_frontend(tmp_path, fake_agent, capsys):
     prompt, options = fake_agent[0]
     backend, frontend = prompt.split('The product has a frontend')
     assert 'package_guide("bazis-statusy")' in backend
+    # a project made before the ports gets them
+    assert main.ports_text(scaffold.project_ports(tmp_path)) in frontend
     order = ['spec/', 'bazis_front contract', 'front_check', 'front_catalog', 'bazis_front add',
              'bazis_front e2e', 'e2e_data', 'npx tsc --noEmit', 'npm test', 'npm run e2e']
     positions = [frontend.index(text) for text in order]
@@ -939,6 +1050,7 @@ def test_audit_of_a_product_with_a_frontend(tmp_path, fake_agent, fix):
     assert '4. Report the problems' in prompt
     # a review cannot run commands: it lists them
     assert ('cannot run' in prompt) is not fix
+    assert ('`.bazis/ports.json`' in prompt) is fix
     assert ('bazis_front contract --check' in prompt) is fix
     assert agent.FRONTEND_RULES in options.system_prompt['append']
 
@@ -960,6 +1072,9 @@ def test_failed_run(tmp_path, monkeypatch, capsys):
     assert 'the budget (--budget) is spent' in err
     assert '[3 turns, $0.50]' in err
     assert 'claude login' not in err
+    facts = json.loads((tmp_path / agent.RUN_FILE).read_text())
+    assert facts['subtype'] == 'error_max_budget_usd'
+    assert facts['error'] == 'the budget (--budget) is spent'
 
 
 def test_new_in_a_directory_with_files(tmp_path, fake_agent, capsys):

@@ -21,7 +21,9 @@ import json
 import re
 import sys
 import warnings
+from collections import Counter
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TextIO
 
@@ -39,6 +41,8 @@ from claude_agent_sdk import (
 )
 from claude_agent_sdk.types import CanUseToolShadowedWarning
 
+from . import scaffold
+
 
 DEFAULT_MODEL = 'claude-opus-5-5'
 DEFAULT_EFFORT = 'high'
@@ -47,6 +51,8 @@ DEFAULT_EFFORT = 'high'
 GIT_DENY = ['Bash(git commit:*)', 'Bash(git push:*)', 'Bash(git reset:*)', 'Bash(git rebase:*)']
 #: tools a review cannot use
 WRITE_TOOLS = ['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Bash', 'WebFetch', 'WebSearch']
+#: the facts of the last run in the project, for the user and the measurements of the runs
+RUN_FILE = f'{scaffold.LOCAL_DIR}/run.json'
 GIT_COMMAND_RE = re.compile(r'(^|[;&|(]\s*)git\s+(commit|push|reset|rebase)\b', re.MULTILINE)
 
 RULES = """\
@@ -60,15 +66,22 @@ separate package `bazis-<name>`. A project installs only the packages it needs.
   `list_packages` (what each package solves and requires), `package_guide` (how to use a
   package, also `bazis` for the core), `project_info` (the installed packages, settings,
   models and routes of this project) and `run_doctor` (the system checks). Read the guide
-  of every package before you use it and follow it exactly.
+  of a package before you use it and follow it exactly: a long guide comes as its
+  introduction with the titles of its sections; read the introduction, then a section
+  (`package_guide(name, section)`) when a step needs it, never all of them in advance.
+- The guides are the documentation of Bazis: do not read the sources of its packages (in
+  `.venv`, the copies in `frontend/src/bazis/` and `frontend/e2e/bazis/`, checkouts) to
+  find out how to use them. Only when the guide lacks a fact you need, read the source,
+  and name the gap in "Guide gaps" of the summary.
 - Read `AGENTS.md` (and `CLAUDE.md` if there is one) of the project first.
 - The Python environment is `.venv` (`.venv/bin/python`, on Windows
   `.venv\\Scripts\\python.exe`); `installed_version` of `list_packages` is the version in it.
-  Add a package to `requirements.txt` with its latest release as the minimum
-  (`<name>>=<catalog_version>` of `list_packages`; a package without a `catalog_version`,
-  such as bazis-front, without a minimum, as its guide or the task says), install it with
-  `.venv/bin/python -m pip install -r requirements.txt` and list its app in
-  `BS_INSTALLED_APPS` of `project.env` when its guide says so.
+  Add a package to `requirements.txt`, install it with `.venv/bin/python -m pip install -r
+  requirements.txt`, then give it its installed release as the minimum: `<name>>=X.Y.Z`,
+  the numbers of `installed_version` without a suffix such as `.post1.dev3` (its guide
+  and your code follow that version). A requirement that the task gives is written as it
+  is; never lower a minimum. List its app in `BS_INSTALLED_APPS` of `project.env` when its
+  guide says so.
 - After changing models run `.venv/bin/python manage.py makemigrations`. After every change
   run `run_doctor` and fix the errors and the warnings of the packages you used. With the
   database of `.env` it also checks the data against the declarations (`permit.W005`,
@@ -125,9 +138,13 @@ separate package `bazis-<name>`. A project installs only the packages it needs.
   report it. When the task says that the database already has data of another project or
   could not be inspected, it is not ready: never migrate it nor change its data, say that
   the user checks the access to it or sets another `BS_DATABASES__DEFAULT__NAME` in `.env`.
-- End with a short summary: what you built or changed, the Bazis packages used, how to run
-  it, what you created outside the files (such as the database), and what is left for the
-  user.
+- Run the final checks once, after the last change: fix what fails and run again only the
+  checks that failed, not the whole round.
+- End with a short summary in these sections: Built (what you built or changed), Packages
+  (the Bazis packages used), Run (how to run it), Outside the files (what you created
+  outside them, such as the database), Left for you (what is left for the user, each with
+  its reason) and Guide gaps (each fact a guide lacked: the package, the fact, the source
+  you read instead; "none" when there was none).
 
 # Languages
 
@@ -168,9 +185,10 @@ FRONTEND_RULES = """\
 
 The product has a frontend made by bazis-front: the specs of the product in `spec/`, the
 contract generated from the backend in `contract/`, the React app in `frontend/`. The
-guides are `package_guide("bazis-front")` and `frontend/AGENTS.md`: read them before you
-change the frontend and follow them exactly. All the frontend logic is in bazis-front: use
-its commands, do not write generators or frontends of your own.
+guides are `package_guide("bazis-front")` and `frontend/AGENTS.md`: read their
+introductions before you change the frontend, then the section of a step when you reach
+it, and follow them exactly. All the frontend logic is in bazis-front: use its commands,
+do not write generators or frontends of your own.
 
 - The frontend is changed with the subcommands of `.venv/bin/python manage.py bazis_front`
   (`init`, `contract`, `check`, `add`, `design`, `e2e`, `update`). The MCP tools read it: `front_check` (the issues of the specs
@@ -200,11 +218,17 @@ its commands, do not write generators or frontends of your own.
   per `test_user` of the roles, with its role and the password of the environment
   variable `E2E_PASSWORD`, and the records the scenarios need (the items they open). It
   can run again (it sets the passwords again).
+- The servers use the ports of the project on this machine, `.bazis/ports.json`
+  (`backend`, `frontend`, `e2e`), never the defaults 8000 and 5173 that other projects
+  use. After `bazis_front init` write `BAZIS_API_URL=http://localhost:<backend>` in
+  `frontend/.env.local` (not committed), which `npm run dev` and `npm run e2e` read; the
+  dev server is `npm run dev -- --port <frontend>`.
 - After changing the frontend run in `frontend/` `npx tsc --noEmit`, `npm run lint` and
   `npm test`; after changing the specs or the screens also `bazis_front e2e` and
   `npm run e2e` against the running backend: migrate, run `e2e_data`, start
-  `.venv/bin/uvicorn <project package>.main:app --port 8000` in the background, run
-  `E2E_PASSWORD=<the same password> npm run e2e`, then stop the backend.
+  `.venv/bin/uvicorn <project package>.main:app --port <backend>` in the background, run
+  `E2E_PORT=<e2e> E2E_PASSWORD=<the same password> npm run e2e`, then stop the backend.
+  A test that fails only sometimes gets one attempt at a fix, then goes to Left for you.
 - Node.js with npm is needed by `npm install`, the TypeScript of the contract
   (`schema.d.ts`), the build and the tests of the frontend, and the contract by a migrated
   database. Without them do the other steps and say which ones did not run.
@@ -355,9 +379,10 @@ def describe(tool_name: str, tool_input: dict) -> str:
     return ''
 
 
-def render(message, out: TextIO | None = None) -> ResultMessage | None:
+def render(message, out: TextIO | None = None, tools: Counter | None = None) -> ResultMessage | None:
     """
-    Prints the text of the agent and one line per tool call; returns the final result.
+    Prints the text of the agent and one line per tool call, counted in `tools` by name;
+    returns the final result.
     """
     out = out or sys.stdout
     if isinstance(message, AssistantMessage):
@@ -366,6 +391,8 @@ def render(message, out: TextIO | None = None) -> ResultMessage | None:
                 out.write(block.text.rstrip() + '\n')
             elif isinstance(block, ToolUseBlock):
                 name = block.name.removeprefix('mcp__bazis__')
+                if tools is not None:
+                    tools[name] += 1
                 out.write(f'  > {name} {describe(block.name, block.input)}'.rstrip() + '\n')
         out.flush()
     elif isinstance(message, ResultMessage):
@@ -373,21 +400,49 @@ def render(message, out: TextIO | None = None) -> ResultMessage | None:
     return None
 
 
+def write_run(task: Task, result: ResultMessage, tools: Counter, started: datetime) -> None:
+    """
+    Writes the facts of a run as JSON to RUN_FILE of the project: the turns, the cost, the
+    duration, the usage of the tokens and the calls of each tool.
+    """
+    facts = {
+        'started': started.isoformat(timespec='seconds'),
+        'model': task.model,
+        'effort': task.effort,
+        'subtype': result.subtype,
+        'error': error_text(result) if result.is_error else None,
+        'turns': result.num_turns,
+        'cost_usd': result.total_cost_usd,
+        'duration_ms': result.duration_ms,
+        'duration_api_ms': result.duration_api_ms,
+        'usage': result.usage,
+        'model_usage': result.model_usage,
+        'tools': dict(tools.most_common()),
+    }
+    path = scaffold.local_dir(task.project_dir) / 'run.json'
+    path.write_text(json.dumps(facts, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
+
+
 async def run(task: Task, out: TextIO | None = None) -> ResultMessage | None:
     """
-    Runs the task and prints the progress; returns the final result of the agent.
+    Runs the task and prints the progress; returns the final result of the agent, whose
+    facts are written to RUN_FILE.
     """
     result = None
+    tools = Counter()
+    started = datetime.now(UTC)
     # the read-only MCP tools of bazis-mcp are allowed in advance on purpose
     warnings.filterwarnings('ignore', category=CanUseToolShadowedWarning)
     try:
         async for message in query(prompt=task.prompt, options=options(task)):
-            result = render(message, out) or result
+            result = render(message, out, tools) or result
     except ResultError:
         # the CLI exits with an error after a failed result (e.g. the budget is spent):
         # the result says why
         if result is None:
             raise
+    if result is not None:
+        write_run(task, result, tools, started)
     return result
 
 

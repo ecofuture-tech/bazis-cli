@@ -39,9 +39,10 @@ bazis audit --fix
 
 - `bazis new DIR DESCRIPTION` writes the skeleton of a project: the project package
   (settings, root router, ASGI app), `project.env`, `.env` with a generated secret key,
-  `requirements.txt`, `requirements-dev.txt`, `tests/`, `.mcp.json` and `AGENTS.md`. It
-  creates `.venv` with Bazis and bazis-mcp (with uv if it is installed; `--no-venv` skips
-  it) and the database of `.env` with PostGIS when PostgreSQL is reachable (else it says
+  `requirements.txt`, `requirements-dev.txt`, `tests/`, `.mcp.json` and `AGENTS.md`, and
+  chooses free ports for the servers of the project (`.bazis/ports.json`). It creates
+  `.venv` with Bazis and bazis-mcp (with uv if it is installed; `--no-venv` skips it),
+  raises the minimums of the requirements to the installed releases, and the database of `.env` with PostGIS when PostgreSQL is reachable (else it says
   so and goes on). Then the agent chooses the Bazis packages, creates the apps, models,
   routes, migrations and tests, and runs the checks.
 - By default `bazis new` builds the whole product with its frontend, made by
@@ -62,6 +63,9 @@ bazis audit --fix
   `bazis add bazis-front` builds the frontend of a backend.
 - `bazis audit [--fix]` reports the problems of the project by severity, with the checks
   of the frontend when it has one. Without `--fix` the agent can only read.
+
+Every command writes the facts of its run (turns, cost, duration, tokens, calls of each
+tool) to `.bazis/run.json` of the project; `.bazis/` is never committed.
 
 Options of every command: `--project-dir` (`add`, `audit`; default: the current
 directory), `--model` (default `claude-opus-5-5`), `--effort` (`low` ... `max`, default
@@ -90,12 +94,13 @@ The roles of a product are declared in `<app>/roles.py` and its statuses and tra
 `<app>/workflow.py`; `migrate` applies them. The end-to-end tests of
 the frontend run against the backend with the test data of `python manage.py e2e_data`
 (the e2e data command recommended by bazis-front): the test users of the roles, with the
-password of `E2E_PASSWORD`, and the records the scenarios need:
+password of `E2E_PASSWORD`, and the records the scenarios need, on the ports of
+`.bazis/ports.json` (`frontend/.env.local` sends `/api` to the backend with `BAZIS_API_URL`):
 
 ```bash
 E2E_PASSWORD=... .venv/bin/python manage.py e2e_data
-.venv/bin/uvicorn shop.main:app --port 8000 &
-cd frontend && E2E_PASSWORD=... npm run e2e
+.venv/bin/uvicorn shop.main:app --port <backend> &
+cd frontend && E2E_PORT=<e2e> E2E_PASSWORD=... npm run e2e
 ```
 
 To try a bazis-front that is not on PyPI yet, point `BAZIS_FRONT_REQUIREMENT` to a wheel,
