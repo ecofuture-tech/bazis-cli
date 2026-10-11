@@ -232,7 +232,8 @@ do not write generators or frontends of your own.
   `frontend/.env.local` (not committed), which `npm run dev` and `npm run e2e` read; the
   dev server is `npm run dev -- --port <frontend>`.
 - After changing the frontend run in `frontend/` `npx tsc --noEmit`, `npm run lint` and
-  `npm test`; after changing the specs or the screens also `bazis_front e2e` and
+  `npm test`; format only with `npm run format` (the prettier pinned in its `package.json`,
+  which leaves the copies alone), never `npx prettier`; after changing the specs or the screens also `bazis_front e2e` and
   `npm run e2e` against the running backend: migrate, run `e2e_data`, start
   `.venv/bin/uvicorn <project package>.main:app --port <backend>` in the background, run
   `E2E_PORT=<e2e> E2E_PASSWORD=<the same password> npm run e2e`, then stop the backend.
