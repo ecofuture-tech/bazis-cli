@@ -50,8 +50,9 @@ FRONTEND_STEPS = """\
 3. Make the backend satisfy the specs: the apps, models, route sets and routers; the
    permit roles with the permissions of the access and the statuses and transits of the
    workflows declared in `roles.py` and `workflow.py`; the e2e data command recommended by bazis-front,
-   `e2e_data`, with only the test users and the records the scenarios need; tests; the
-   translations of the backend in each language other than English; `makemigrations`;
+   `e2e_data`, with only the test users and the records the scenarios need; the tests
+   that the rules require (every rule of the description and every role, parallel
+   requests for every limit and uniqueness, at least 10); the translations of the backend in each language other than English; `makemigrations`;
    `run_doctor` without errors.
 4. Migrate the database (`.venv/bin/python manage.py migrate`) and export the contract
    (`.venv/bin/python manage.py bazis_front contract`).

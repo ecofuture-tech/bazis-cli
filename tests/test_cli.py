@@ -947,6 +947,27 @@ def test_rules_of_the_languages_and_the_tests():
         assert text in frontend, text
 
 
+def test_rules_of_the_coverage_of_the_tests():
+    """
+    The tests cover the description (its rules, its roles both ways, parallel requests for
+    every limit and uniqueness, at least 10), with `parallel` of bazis-test-utils or the
+    threads it stands for in an older release; the step of the backend names them.
+    """
+    rules = ' '.join(agent.RULES.split())
+    for text in ('a test for every rule and invariant it states', 'a limit, a uniqueness, a rule of a status',
+                 'one of what it may not (403, 404 or 422)', 'its `test_user` in a spec',
+                 'for every limit and uniqueness a test of parallel requests',
+                 '`@pytest.mark.django_db(transaction=True)`', '`parallel` of `bazis_test_utils` when its guide has it',
+                 '`threading.Barrier`', 'each closing its database connections',
+                 'the answers are 201, 409 or 422, never 500', 'At least 10 tests',
+                 'none of the framework itself'):
+        assert text in rules, text
+    assert 'Write tests for the behavior you add' not in rules
+    steps = ' '.join(main.FRONTEND_STEPS.split())
+    assert 'the tests that the rules require (every rule of the description and every role' in steps
+    assert 'parallel requests for every limit and uniqueness, at least 10' in steps
+
+
 def test_new_with_a_name(tmp_path, fake_agent):
     args = ['new', str(tmp_path / 'x'), 'anything', '--name', 'catalog', '--no-venv']
     assert main.main(args) == 0
