@@ -157,6 +157,8 @@ BS_CACHES__DEFAULT__LOCATION=redis://localhost:6379/0
 # the files of this project, not those of every project in /tmp
 BS_MEDIA_ROOT=__BASE_DIR__/media
 BS_STATIC_ROOT=__BASE_DIR__/static
+# the mails are printed, not sent: a development environment has no SMTP server
+BS_BAZIS_EMAIL_BACKEND=django.core.mail.backends.console.EmailBackend
 '''
 
 GITIGNORE = '''.env
@@ -233,6 +235,11 @@ FastAPI and Pydantic.
 - PostgreSQL with PostGIS and Redis are required to run the project and the tests
   (`.env`); the checks and `makemigrations` work without them. The tests share Redis: they
   never flush it, their cache keys have a prefix of their own (`tests/conftest.py`).
+- The mails are printed to the console in development (`BS_BAZIS_EMAIL_BACKEND` of `.env`,
+  the console backend of Django): the server, the commands (`e2e_data`) and the background
+  tasks need no SMTP server, and the tests read them in `django.core.mail.outbox`. A
+  deployment removes the variable and sets the SMTP server and the sender (the E-mail
+  section of the guide of the core).
 - The languages are `BS_LANGUAGES` and `BS_LANGUAGE_CODE` (`project.env`), English always
   among them: the texts of the code are English msgids (`gettext_lazy`), translated in
   the catalogs of the project, `locale/<language>/LC_MESSAGES/django.po`, by `python

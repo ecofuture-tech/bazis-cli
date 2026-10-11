@@ -150,9 +150,13 @@ def test_scaffold_is_a_working_project(tmp_path):
     # the files of the project are its own, not those of every project in /tmp
     assert 'BS_MEDIA_ROOT=__BASE_DIR__/media\n' in (directory / '.env').read_text()
     done = manage(directory, 'shell', '-c',
-                  'from django.conf import settings; print(settings.MEDIA_ROOT, settings.STATIC_ROOT)')
-    roots = [Path(it).resolve() for it in done.stdout.splitlines()[-1].split()]
-    assert roots == [(directory / 'media').resolve(), (directory / 'static').resolve()], done.stderr
+                  'from django.conf import settings; print(settings.MEDIA_ROOT, settings.STATIC_ROOT, '
+                  "settings.MAILERS['default']['BACKEND'])")
+    *roots, mailer = done.stdout.splitlines()[-1].split()
+    assert [Path(it).resolve() for it in roots] == [(directory / 'media').resolve(), (directory / 'static').resolve()], done.stderr
+    # the mails of development are printed: no SMTP server is needed (`e2e_data`, the tasks)
+    assert mailer == 'django.core.mail.backends.console.EmailBackend'
+    assert '`BS_BAZIS_EMAIL_BACKEND` of `.env`' in (directory / 'AGENTS.md').read_text()
     # the ports of the project, in its local directory that Git ignores
     ports = json.loads((directory / '.bazis' / 'ports.json').read_text())
     assert set(ports) == set(scaffold.PORTS) and len(set(ports.values())) == 3
