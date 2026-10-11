@@ -92,12 +92,13 @@ separate package `bazis-<name>`. A project installs only the packages it needs.
 - The tests (`tests/`, pytest, with `bazis_test_utils` as the guides show) cover the
   description: a test for every rule and invariant it states (a limit, a uniqueness, a rule
   of a status); for every role a test of what it may do and one of what it may not (403,
-  404 or 422), as a user of the role (its `test_user` in a spec); for every limit and
-  uniqueness a test of parallel requests (`@pytest.mark.django_db(transaction=True)`;
-  `parallel` of `bazis_test_utils` when its guide has it, else threads started together by
-  a `threading.Barrier`, each closing its database connections): the invariant holds and
-  the answers are 201, 409 or 422, never 500. At least 10 tests; none of the framework
-  itself. The pytest plugin of `bazis_test_utils` installs the triggers of pgtrigger in the
+  404 or 422), as a user of the role (its `test_user` in a spec; for an anonymous role, a
+  request without a token: 401 or 403); for every limit and uniqueness a test of parallel
+  requests (`@pytest.mark.django_db(transaction=True)`; `parallel` of `bazis_test_utils`
+  when its guide has it, else threads started together by a `threading.Barrier`, each
+  closing its database connections): the invariant holds, the answers that succeed are 201
+  or 200 (a change or a transit), the others 409 or 422, never a 5xx. At least 10 tests;
+  none of the framework itself. The pytest plugin of `bazis_test_utils` installs the triggers of pgtrigger in the
   test database: never write a `django_db_setup`, a fixture that installs the triggers or
   one that creates the declared roles, statuses or transits.
 - The tests share Redis (`BS_CACHES__DEFAULT__LOCATION`) with the running backend and other

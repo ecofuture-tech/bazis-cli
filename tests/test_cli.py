@@ -956,10 +956,12 @@ def test_rules_of_the_coverage_of_the_tests():
     rules = ' '.join(agent.RULES.split())
     for text in ('a test for every rule and invariant it states', 'a limit, a uniqueness, a rule of a status',
                  'one of what it may not (403, 404 or 422)', 'its `test_user` in a spec',
+                 'for an anonymous role, a request without a token: 401 or 403',
                  'for every limit and uniqueness a test of parallel requests',
                  '`@pytest.mark.django_db(transaction=True)`', '`parallel` of `bazis_test_utils` when its guide has it',
                  '`threading.Barrier`', 'each closing its database connections',
-                 'the answers are 201, 409 or 422, never 500', 'At least 10 tests',
+                 'the answers that succeed are 201 or 200 (a change or a transit)',
+                 'the others 409 or 422, never a 5xx', 'At least 10 tests',
                  'none of the framework itself'):
         assert text in rules, text
     assert 'Write tests for the behavior you add' not in rules
