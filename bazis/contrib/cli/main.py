@@ -60,7 +60,8 @@ FRONTEND_STEPS = """\
 6. Choose the components with `front_catalog` and copy those the screens need
    (`.venv/bin/python manage.py bazis_front add ...`), then write the screens in
    `frontend/src/screens/<id>/` from their specs, composed from the components, with
-   their routes and navigation in `frontend/src/app/`, as `frontend/AGENTS.md` shows;
+   their routes and navigation in `frontend/src/app/`, as the section "Writing the
+   screens" of the guide of bazis-front shows;
    their texts go through `t()`, in the dictionaries of the product of every language.
 7. Write the design in `spec/design/` (the brand, the colors and the fonts that fit
    {source}) and generate the theme (`.venv/bin/python manage.py bazis_front design`).

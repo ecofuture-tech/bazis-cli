@@ -185,9 +185,9 @@ FRONTEND_RULES = """\
 
 The product has a frontend made by bazis-front: the specs of the product in `spec/`, the
 contract generated from the backend in `contract/`, the React app in `frontend/`. The
-guides are `package_guide("bazis-front")` and `frontend/AGENTS.md`: read their
-introductions before you change the frontend, then the section of a step when you reach
-it, and follow them exactly. All the frontend logic is in bazis-front: use its commands,
+guide is `package_guide("bazis-front")` (`frontend/AGENTS.md` only points to its
+sections): read its introduction before you change the frontend, then the section of a
+step when you reach it, and follow it exactly. All the frontend logic is in bazis-front: use its commands,
 do not write generators or frontends of your own.
 
 - The frontend is changed with the subcommands of `.venv/bin/python manage.py bazis_front`

@@ -780,7 +780,7 @@ def test_frontend_rules():
                  '`npm run dev -- --port <frontend>`', '--port <backend>',
                  '`E2E_PORT=<e2e> E2E_PASSWORD=<the same password> npm run e2e`',
                  'one attempt at a fix, then goes to Left for you',
-                 'read their introductions'):
+                 'read its introduction'):
         assert text in rules, text
     assert '--port 8000' not in rules
 
