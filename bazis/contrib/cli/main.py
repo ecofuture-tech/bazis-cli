@@ -249,8 +249,8 @@ def audit_task(args) -> agent.Task:
             )
         steps = f"""\
 3. The frontend (bazis-front): run `front_check` and `front_status`, and compare `spec/`
-   and `frontend/` with the guides of bazis-front (`package_guide("bazis-front")`,
-   `frontend/AGENTS.md`): edited copies or generated files, roles or permission rules in
+   and `frontend/` with the guide of bazis-front (`package_guide("bazis-front")`;
+   `frontend/AGENTS.md` only points to its sections): edited copies or generated files, roles or permission rules in
    the screens, literal colors, scenarios that miss a role or what it may not do, screens
    that are not composed from the components; {run}.
 """

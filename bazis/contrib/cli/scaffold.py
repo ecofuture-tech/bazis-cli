@@ -248,8 +248,8 @@ AGENTS_MD_FRONTEND = '''
 
 The product has a frontend made by [bazis-front](https://github.com/ecofuture-tech/bazis-front)
 (`package_guide("bazis-front")` of the MCP server): the specs of the product in `spec/`,
-the contract generated from the backend in `contract/`, the React app in `frontend/` (its
-guide is `frontend/AGENTS.md`). Node.js 22.12 or newer with npm is needed for the frontend.
+the contract generated from the backend in `contract/`, the React app in `frontend/` (the
+guide is `package_guide("bazis-front")`; `frontend/AGENTS.md` only points to its sections). Node.js 22.12 or newer with npm is needed for the frontend.
 
 - The backend is built to satisfy the specs. After every change of the models, routes,
   roles, statuses or transits: migrate, `python manage.py bazis_front contract`, then
