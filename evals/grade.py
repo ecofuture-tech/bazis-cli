@@ -26,7 +26,6 @@ The grader runs on POSIX only (macOS, Linux): it stops the servers and the comma
 starts by their process group.
 """
 
-import json
 import os
 import re
 import secrets
@@ -34,18 +33,20 @@ import shutil
 import signal
 import socket
 import subprocess
-import sys
 import time
 import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
+
+from bazis.contrib.cli import scaffold
+from bazis.contrib.mcp import project as mcp_project
 
 
 #: the prefixes of the system check ids of the Bazis packages (the Django `security.*`
 #: deployment warnings are not graded: projects run with DEBUG in development)
 BAZIS_CHECK_PREFIXES = (
     'bazis.', 'users.', 'permit.', 'author.', 'authing.', 'statusy.', 'uploadable.',
-    'async_request.',
+    'async_request.', 'bg.', 'front.',
 )
 TIMEOUT = 900
 
@@ -55,13 +56,6 @@ class Check:
     name: str
     passed: bool
     detail: str = ''
-
-
-def python_of(project: Path) -> str:
-    for path in (project / '.venv' / 'bin' / 'python', project / '.venv' / 'Scripts' / 'python.exe'):
-        if path.is_file():
-            return str(path)
-    return sys.executable
 
 
 def execute(command: list[str], cwd: Path, env: dict) -> subprocess.CompletedProcess:
@@ -105,19 +99,7 @@ def stop(process: subprocess.Popen, kill: bool = False) -> None:
 
 
 def run(project: Path, args: list[str], env: dict) -> subprocess.CompletedProcess:
-    return execute([python_of(project), *args], project, env)
-
-
-def json_in(text: str):
-    """
-    The first JSON document in the output (the project may print lines before it).
-    """
-    for match in re.finditer(r'^[\[{]', text, re.MULTILINE):
-        try:
-            return json.JSONDecoder().raw_decode(text, match.start())[0]
-        except ValueError:
-            continue
-    return None
+    return execute([mcp_project.find_python(project), *args], project, env)
 
 
 def tail(done: subprocess.CompletedProcess, lines: int = 12) -> str:
@@ -144,6 +126,18 @@ def project_env(database: str) -> dict:
     return env
 
 
+def package_warnings(messages: list[dict]) -> list[str]:
+    """
+    The ids of the warnings of the Bazis packages among the messages of `bazis_doctor`; the
+    infos are not graded: the doctor runs before the database of the grading exists
+    (`bazis.database`, `front.I001`).
+    """
+    return [
+        m['id'] for m in messages
+        if m['level'] == 'warning' and m['id'].startswith(BAZIS_CHECK_PREFIXES)
+    ]
+
+
 def grade(project: Path, task: dict) -> list[Check]:
     project = project.resolve()
     database = f'eval_{task["id"]}_{uuid.uuid4().hex[:8]}'
@@ -151,17 +145,17 @@ def grade(project: Path, task: dict) -> list[Check]:
     checks: list[Check] = []
 
     doctor = run(project, ['manage.py', 'bazis_doctor', '--json'], env)
-    messages = json_in(doctor.stdout)
+    messages = mcp_project.parse_json(doctor.stdout)
     if messages is None:
         checks.append(Check('project loads', False, tail(doctor)))
         return checks
     checks.append(Check('project loads', True))
     errors = [m for m in messages if m['level'] in ('error', 'critical')]
     checks.append(Check('no check errors', not errors, '; '.join(m['id'] for m in errors)))
-    warnings = [m['id'] for m in messages if m['id'].startswith(BAZIS_CHECK_PREFIXES)]
+    warnings = package_warnings(messages)
     checks.append(Check('no warnings of Bazis packages', not warnings, ', '.join(warnings)))
 
-    info = json_in(run(project, ['manage.py', 'bazis_introspect'], env).stdout) or {}
+    info = mcp_project.parse_json(run(project, ['manage.py', 'bazis_introspect'], env).stdout) or {}
     installed = {p['name'] for p in info.get('packages', [])}
     missing = sorted(set(task.get('expected_packages', [])) - installed)
     checks.append(Check('expected Bazis packages', not missing, 'missing: ' + ', '.join(missing) if missing else ''))
@@ -242,7 +236,7 @@ def language_check(project: Path, info: dict, language: str, env: dict) -> Check
     if status.returncode != 0:
         incomplete = {
             code: len(it['untranslated']) + len(it['fuzzy'])
-            for code, it in (json_in(status.stdout) or {}).items()
+            for code, it in (mcp_project.parse_json(status.stdout) or {}).items()
             if it['untranslated'] or it['fuzzy']
         }
         problems.append(
@@ -267,7 +261,7 @@ def frontend_checks(project: Path, env: dict, min_scenarios: int) -> list[Check]
     checks = [Check('frontend created', True)]
 
     spec = run(project, ['manage.py', 'bazis_front', 'check', '--json'], env)
-    result = json_in(spec.stdout)
+    result = mcp_project.parse_json(spec.stdout)
     if result is None:
         checks.append(Check('specs valid against the contract', False, tail(spec)))
     else:
@@ -308,14 +302,8 @@ def project_package(project: Path) -> str:
     """
     The project package, from DJANGO_SETTINGS_MODULE of manage.py.
     """
-    match = re.search(r"DJANGO_SETTINGS_MODULE', '(\w+)\.settings'", (project / 'manage.py').read_text())
-    return match.group(1) if match else project.name
-
-
-def free_port() -> int:
-    with socket.socket() as sock:
-        sock.bind(('127.0.0.1', 0))
-        return sock.getsockname()[1]
+    match = mcp_project.SETTINGS_RE.search((project / 'manage.py').read_text())
+    return match.group(1).rpartition('.')[0] if match else project.name
 
 
 def wait_for_port(port: int, server: subprocess.Popen, seconds: int = 60) -> bool:
@@ -361,9 +349,9 @@ def end_to_end(project: Path, env: dict) -> Check:
         return Check(name, False, 'playwright install: ' + tail(browser, 6))
     servers = []
     try:
-        api, web = free_port(), free_port()
+        api, web = scaffold.free_ports(2)
         backend = serve(
-            [python_of(project), '-m', 'uvicorn', f'{project_package(project)}.main:app',
+            [mcp_project.find_python(project), '-m', 'uvicorn', f'{project_package(project)}.main:app',
              '--host', '127.0.0.1', '--port', str(api)],
             project, env, api,
         )

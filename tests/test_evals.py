@@ -76,9 +76,14 @@ def test_language_check(tmp_path, monkeypatch):
     assert check.detail == "LANGUAGE_CODE is 'en'; LANGUAGES are ['en']; catalogs incomplete: ru 2"
 
 
-def test_json_in_output_with_other_lines():
-    assert grade.json_in('Loading...\n{"models": []}\n') == {'models': []}
-    assert grade.json_in('Traceback: no json') is None
+def test_package_warnings():
+    messages = [
+        {'id': id_, 'level': level}
+        for id_, level in [('bazis.database', 'info'), ('front.I001', 'info'),
+                           ('front.W002', 'warning'), ('bg.W001', 'warning'),
+                           ('security.W004', 'warning'), ('permit.E001', 'error')]
+    ]
+    assert grade.package_warnings(messages) == ['front.W002', 'bg.W001']
 
 
 def test_local_apps(tmp_path):
@@ -215,8 +220,7 @@ def test_end_to_end_uses_servers_of_its_own(tmp_path, monkeypatch):
     calls, started, stopped = [], [], []
     monkeypatch.setattr(grade, 'run', lambda project, args, env: done())
     monkeypatch.setattr(grade, 'npm', lambda frontend, args, env: calls.append((args, env)) or done())
-    ports = iter([8001, 5174])
-    monkeypatch.setattr(grade, 'free_port', lambda: next(ports))
+    monkeypatch.setattr(grade.scaffold, 'free_ports', lambda count: [8001, 5174][:count])
 
     def serve(command, cwd, env, port):
         started.append((command, env, port))
