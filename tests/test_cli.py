@@ -739,31 +739,29 @@ def test_new(tmp_path, fake_agent, capsys, environment):
 
 def test_new_prompt_of_a_product():
     """
-    The prompt of a product with a frontend gives the order of the work of the guide of
-    bazis-front, with its commands and the MCP tools.
+    The prompt of a product with a frontend follows the steps of the guide of bazis-front
+    (never a copy of them), with what bazis-cli adds: the packages, `.venv`, the
+    description, one look at the screens, the final checks of the rules and the ports.
     """
     ports = {'backend': 8123, 'frontend': 5199, 'e2e': 5201}
-    prompt = main.new_prompt('A help desk', 'helpdesk', frontend=True, ports=ports)
+    prompt = ' '.join(main.new_prompt('A help desk', 'helpdesk', frontend=True, ports=ports).split())
 
     order = [
         'backend 8123, the dev server of the frontend 5199, the dev server of the end-to-end tests 5201',
-        'package_guide("bazis-front")', 'bazis_front init', 'spec/product.yaml',
-        'spec/screens/', 'Make the backend satisfy the specs', 'e2e_data', 'manage.py migrate',
-        'bazis_front contract', 'as each `hint` says', 'front_catalog', 'bazis_front add',
-        'frontend/src/screens/', 'spec/design/', 'bazis_front design', 'bazis_front e2e',
-        'npx playwright install chromium', 'Look at the screens once', 'One pass',
-        'one run of the final checks', 'front_status', 'npx tsc --noEmit', 'npm run lint',
-        'npm test', 'npm run build', 'uvicorn helpdesk.main:app --port <backend>',
-        'npm run dev -- --port <frontend>',
+        '"Building the frontend of a product"', 'package_guide("bazis-front")',
+        'package_guide("bazis")', 'list_packages', '.venv/bin/python manage.py',
+        'Step 2', 'the specs describe the description', 'what a role may not do', 'front_check',
+        'Step 3', 'the tests and the translations that the rules require', 'run_doctor',
+        'front_catalog', 't()', 'Step 7', 'npx playwright install chromium',
+        'look at the screens once', 'One pass', 'the final checks of the rules',
+        'uvicorn helpdesk.main:app --port <backend>', 'npm run dev -- --port <frontend>',
     ]
     positions = [prompt.index(text) for text in order]
     assert positions == sorted(positions)
-    for text in ('front_check', 'test_user', 'access', 'scenarios', 'workflows', 'statuses'):
-        assert text in prompt
-    assert 'A help desk' in prompt
-    assert 'the description' in prompt
-    # the guides are read by sections, when a step needs them
-    assert 'introductions of the guides' in prompt and '8000' not in prompt
+    assert 'A help desk' in prompt and '8000' not in prompt
+    # the steps of the guide and the rules are not repeated
+    for text in ('bazis_front init', 'e2e_data', 'npm run build', 'At least 10'):
+        assert text not in prompt, text
 
 
 def test_new_prompt_of_a_backend():
@@ -785,26 +783,33 @@ def test_frontend_rules():
                  '`E2E_PORT=<e2e> E2E_PASSWORD=<the same password> npm run e2e`',
                  'one attempt at a fix, then goes to Left for you',
                  'read its introduction',
+                 # the final checks of the frontend, once; `tsc` after a change
+                 'After a change of the frontend run `npx tsc --noEmit`',
+                 'The final checks of the frontend: `front_check` without errors, '
+                 '`front_status` with nothing stale', '`npm run build`',
+                 # what is never edited, also the copy of the dictionaries of the components
+                 '`frontend/src/bazis/i18n/`', '`status` only shows its state',
                  # a formatter of another version and style rewrites the files (round 3, 8)
                  'format only with `npm run format`', 'never `npx prettier`'):
         assert text in rules, text
     assert '--port 8000' not in rules
 
 
-def test_rules_and_steps_agree_on_the_test_data():
+def test_the_declarations_and_the_test_data_are_said_once():
     """
-    Roles, statuses and transits are declared in `roles.py` and `workflow.py` (the contract
-    is exported after migrate); `e2e_data` only adds the test users and the records of the
-    scenarios.
+    Roles, statuses and transits are declared in `roles.py` and `workflow.py` (the rules of
+    every task); the contract is exported after migrate, and `e2e_data` only adds the test
+    users and the records of the scenarios (the rules of the frontend). The steps repeat
+    neither.
     """
     rules = ' '.join(agent.FRONTEND_RULES.split())
     steps = ' '.join(main.FRONTEND_STEPS.split())
-    for text in (rules, steps):
-        assert 'statuses and transits of the workflows' in text
-        assert 'declared in `roles.py` and `workflow.py`' in text and 'data migration' not in text
-        assert 'the e2e data command recommended by bazis-front' in text
+    assert 'statuses and transits of the workflows that `migrate` applied' in rules
+    assert 'the e2e data command recommended by bazis-front' in rules
     assert 'it creates only a user per `test_user`' in rules
-    assert '`e2e_data`, with only the test users and the records the scenarios need' in steps
+    for text in (rules, steps):
+        assert 'data migration' not in text and '`roles.py`' not in text
+    assert 'e2e_data' not in steps
 
 
 def test_the_rules_follow_the_released_stack():
@@ -819,6 +824,9 @@ def test_the_rules_follow_the_released_stack():
                  'keeps those migrations as history without effect (`operations = []`',
                  '`django_db_setup`', 'notify(users, lambda user: notification(...))',
                  'publish_changed(item)', "router.register('bazis.contrib.ws.router')",
+                 # with bazis-notify a notification is its own, never a second message
+                 'Notify a user with `notify` of bazis-notify when the project has it',
+                 'never a second message of bazis-ws', 'without bazis-notify, with `notify(users',
                  '`permit.W005`', '`statusy.W003`', '`bazis.database`'):
         assert text in rules, text
     assert 'clear_cache' not in rules and 'data migrations set' not in rules
@@ -895,7 +903,10 @@ def test_rules_of_the_packages_and_of_what_the_agent_leaves():
                  'Built (', 'Packages (', 'Run (', 'Outside the files (', 'such as the database',
                  'Left for you (', 'Guide gaps (',
                  'Run the final checks once, after the last change',
-                 'run again only the checks that failed'):
+                 'run again only the checks that failed',
+                 # `run_doctor` after a change, the tests among the final checks
+                 'After a change run `run_doctor`',
+                 'The final checks are `run_doctor`, the tests and, with a frontend, the checks of its rules'):
         assert text in rules, text
     assert 'catalog_version' not in rules
     assert '.scratch/' in scaffold.GITIGNORE.splitlines()
@@ -912,7 +923,7 @@ def test_rules_of_the_guides():
                  'do not read the sources of its packages',
                  '`frontend/src/bazis/` and `frontend/e2e/bazis/`',
                  'Only when the guide lacks a fact you need, read the source',
-                 'name the gap in "Guide gaps" of the summary'):
+                 'name the gap in "Guide gaps" of the summary', '`guide_search`'):
         assert text in rules, text
 
 
@@ -972,8 +983,8 @@ def test_rules_of_the_coverage_of_the_tests():
         assert text in rules, text
     assert 'Write tests for the behavior you add' not in rules
     steps = ' '.join(main.FRONTEND_STEPS.split())
-    assert 'the tests that the rules require (every rule of the description and every role' in steps
-    assert 'parallel requests for every limit and uniqueness, at least 10' in steps
+    assert 'the tests and the translations that the rules require' in steps
+    assert 'at least 10' not in steps.lower()
 
 
 def test_new_with_a_name(tmp_path, fake_agent):
@@ -1009,7 +1020,7 @@ def test_add_to_a_product_with_a_frontend(tmp_path, fake_agent, capsys):
     # a project made before the ports gets them
     assert main.ports_text(scaffold.project_ports(tmp_path)) in frontend
     order = ['spec/', 'bazis_front contract', 'front_check', 'front_catalog', 'bazis_front add',
-             'bazis_front e2e', 'e2e_data', 'npx tsc --noEmit', 'npm test', 'npm run e2e']
+             'bazis_front e2e', 'e2e_data', 'the final checks of the rules']
     positions = [frontend.index(text) for text in order]
     assert positions == sorted(positions)
     assert agent.FRONTEND_RULES in options.system_prompt['append']
@@ -1027,8 +1038,9 @@ def test_add_the_frontend(tmp_path, fake_agent):
     prompt, options = fake_agent[0]
     assert 'package_guide("bazis-front")' in prompt
     assert 'Then build the frontend of the product' in prompt
-    assert 'bazis_front init' in prompt and 'npm run build' in prompt
-    assert 'from the backend and what the project needs it for' in prompt
+    assert '"Building the frontend of a product"' in prompt
+    assert 'the final checks of the rules' in prompt
+    assert 'the specs describe the backend and what the project needs it for' in prompt
     assert 'requirement `bazis-front>=0.1.0`' in prompt
     assert agent.FRONTEND_RULES in options.system_prompt['append']
 
@@ -1073,14 +1085,14 @@ def test_audit_of_a_product_with_a_frontend(tmp_path, fake_agent, fix):
     assert main.main(args) == 0
 
     prompt, options = fake_agent[0]
-    for text in ('front_check', 'front_status', 'package_guide("bazis-front")',
-                 'npx tsc --noEmit', 'npm run lint', 'npm test', 'npm run e2e'):
+    for text in ('front_check', 'front_status', 'package_guide("bazis-front")'):
         assert text in prompt
     assert '4. Report the problems' in prompt
-    # a review cannot run commands: it lists them
+    # a review cannot run commands: it lists them; a fix runs the final checks of the rules
     assert ('cannot run' in prompt) is not fix
+    assert ('npm run build' in prompt) is not fix
     assert ('`.bazis/ports.json`' in prompt) is fix
-    assert ('bazis_front contract --check' in prompt) is fix
+    assert ('the final checks of the rules' in prompt) is fix
     assert agent.FRONTEND_RULES in options.system_prompt['append']
 
 

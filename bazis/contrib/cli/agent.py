@@ -65,8 +65,9 @@ separate package `bazis-<name>`. A project installs only the packages it needs.
 
 - The MCP server `bazis` is the source of truth about Bazis, not your memory of it:
   `list_packages` (what each package solves and requires), `package_guide` (how to use a
-  package, also `bazis` for the core), `project_info` (the installed packages, settings,
-  models and routes of this project) and `run_doctor` (the system checks). Read the guide
+  package, also `bazis` for the core), `guide_search` (the parts of the guides that answer a
+  question, with their sections), `project_info` (the installed packages, settings, models
+  and routes of this project) and `run_doctor` (the system checks). Read the guide
   of a package before you use it and follow it exactly: a long guide comes as its
   introduction with the titles of its sections; read the introduction, then a section
   (`package_guide(name, section)`) when a step needs it, never all of them in advance.
@@ -83,13 +84,13 @@ separate package `bazis-<name>`. A project installs only the packages it needs.
   and your code follow that version). A requirement that the task gives is written as it
   is; never lower a minimum. List its app in `BS_INSTALLED_APPS` of `project.env` when its
   guide says so.
-- After changing models run `.venv/bin/python manage.py makemigrations`. After every change
-  run `run_doctor` and fix the errors and the warnings of the packages you used. With the
+- After changing models run `.venv/bin/python manage.py makemigrations`. After a change run
+  `run_doctor` and fix the errors and the warnings of the packages you used. With the
   database of `.env` it also checks the data against the declarations (`permit.W005`,
   `statusy.W003`: migrate); the info `bazis.database` says the database could not be
-  reached and those checks did not run. Run the
-  tests with `.venv/bin/python -m pytest` when PostgreSQL and Redis are available (`.env`);
-  if they are not, say so instead of skipping the tests silently.
+  reached and those checks did not run. The tests run with `.venv/bin/python -m pytest`
+  when PostgreSQL and Redis are available (`.env`); if they are not, say so instead of
+  skipping the tests silently.
 - The tests (`tests/`, pytest, with `bazis_test_utils` as the guides show) cover the
   description: a test for every rule and invariant it states (a limit, a uniqueness, a rule
   of a status); for every role a test of what it may do and one of what it may not (403,
@@ -114,11 +115,13 @@ separate package `bazis-<name>`. A project installs only the packages it needs.
   project whose data migrations already create them moves them into these modules and
   keeps those migrations as history without effect (`operations = []`, their
   dependencies kept): `migrate` takes over the existing rows.
-- With bazis-ws, publish from the code of a write with `notify(users, lambda user:
-  notification(...))` and `publish_changed(item)` of `bazis.contrib.ws.messages` (after the
-  commit, in the language of each user), never with a Redis client or `on_commit` of your
-  own, and route the socket with `router.register('bazis.contrib.ws.router')` in the root
-  router module.
+- With bazis-ws, publish from the code of a write with `publish_changed(item)` of
+  `bazis.contrib.ws.messages` (after the commit), never with a Redis client or `on_commit`
+  of your own, and route the socket with `router.register('bazis.contrib.ws.router')` in
+  the root router module. Notify a user with `notify` of bazis-notify when the project has
+  it (stored, in his language, and delivered live by bazis-notify itself: never a second
+  message of bazis-ws); without bazis-notify, with `notify(users, lambda user:
+  notification(...))` of `bazis.contrib.ws.messages` (in the language of each user).
 - A route set of bazis-permit that restricts its objects with its own `restrict_queryset`
   and applies it in its `get_queryset` (`FileUploadRouteSet` of bazis-uploadable, the
   routes of bazis-bg, their subclasses) needs no `permit_public = True`, which says that the data of the route is public: set it
@@ -147,8 +150,9 @@ separate package `bazis-<name>`. A project installs only the packages it needs.
   report it. When the task says that the database already has data of another project or
   could not be inspected, it is not ready: never migrate it nor change its data, say that
   the user checks the access to it or sets another `BS_DATABASES__DEFAULT__NAME` in `.env`.
-- Run the final checks once, after the last change: fix what fails and run again only the
-  checks that failed, not the whole round.
+- The final checks are `run_doctor`, the tests and, with a frontend, the checks of its
+  rules. Run the final checks once, after the last change: fix what fails and run again only
+  the checks that failed, not the whole round.
 - End with a short summary in these sections: Built (what you built or changed), Packages
   (the Bazis packages used), Run (how to run it), Outside the files (what you created
   outside them, such as the database), Left for you (what is left for the user, each with
@@ -200,7 +204,8 @@ step when you reach it, and follow it exactly. All the frontend logic is in bazi
 do not write generators or frontends of your own.
 
 - The frontend is changed with the subcommands of `.venv/bin/python manage.py bazis_front`
-  (`init`, `contract`, `check`, `add`, `design`, `e2e`, `update`). The MCP tools read it: `front_check` (the issues of the specs
+  (`init`, `contract`, `check`, `add`, `design`, `e2e`, `update`; `status` only shows its
+  state). The MCP tools read it: `front_check` (the issues of the specs
   against the contract, with a `hint` each), `front_status` (what is stale and the command
   that updates it) and `front_catalog` (the components, the capabilities and the assets
   they require).
@@ -210,8 +215,9 @@ do not write generators or frontends of your own.
   no errors.
 - Never edit `contract/`, `frontend/src/bazis/generated/`, `frontend/e2e/generated/`, the
   copies of `frontend/src/bazis/client/`, `frontend/src/bazis/react/`,
-  `frontend/e2e/bazis/`, `frontend/bazis-front.lock.json` or `frontend/.bazis/`: generate
-  them again with the commands, and wrap the copies in the product code.
+  `frontend/src/bazis/i18n/`, `frontend/e2e/bazis/`, `frontend/bazis-front.lock.json` or
+  `frontend/.bazis/`: generate them again with the commands, and wrap the copies in the
+  product code (the texts of the product are in its own dictionaries).
 - The backend decides the permissions (bazis-permit): never encode roles or permission
   rules in the frontend. The screens use the tokens of the design, never literal colors.
 - The frontend is in the languages of the backend (`languages` and `language` of
@@ -219,9 +225,9 @@ do not write generators or frontends of your own.
   goes through `t()` with a key in the dictionaries of the product,
   `frontend/src/i18n/<language>.ts`, one for each language (listed in
   `frontend/src/i18n/index.ts`); never a text in the JSX.
-- The permit roles with their permissions and the statuses and transits of the workflows
-  are declared in `roles.py` and `workflow.py` and applied by `migrate`: the contract is
-  exported from the migrated database. The test
+- The contract is exported from the migrated database, with the permit roles and the
+  statuses and transits of the workflows that `migrate` applied from their declarations
+  (the rules above). The test
   data of the end-to-end tests is the e2e data command recommended by bazis-front,
   `.venv/bin/python manage.py e2e_data`: on top of the migrations it creates only a user
   per `test_user` of the roles, with its role and the password of the environment
@@ -232,9 +238,12 @@ do not write generators or frontends of your own.
   use. After `bazis_front init` write `BAZIS_API_URL=http://localhost:<backend>` in
   `frontend/.env.local` (not committed), which `npm run dev` and `npm run e2e` read; the
   dev server is `npm run dev -- --port <frontend>`.
-- After changing the frontend run in `frontend/` `npx tsc --noEmit`, `npm run lint` and
-  `npm test`; format only with `npm run format` (the prettier pinned in its `package.json`,
-  which leaves the copies alone), never `npx prettier`; after changing the specs or the screens also `bazis_front e2e` and
+- After a change of the frontend run `npx tsc --noEmit` in `frontend/` and fix what it
+  reports; format only with `npm run format` (the prettier pinned in its `package.json`,
+  which leaves the copies alone), never `npx prettier`.
+- The final checks of the frontend: `front_check` without errors, `front_status` with
+  nothing stale, and in `frontend/` `npx tsc --noEmit`, `npm run lint`, `npm test` and
+  `npm run build`; after a change of the specs or the screens also `bazis_front e2e` and
   `npm run e2e` against the running backend: migrate, run `e2e_data`, start
   `.venv/bin/uvicorn <project package>.main:app --port <backend>` in the background, run
   `E2E_PORT=<e2e> E2E_PASSWORD=<the same password> npm run e2e`, then stop the backend.

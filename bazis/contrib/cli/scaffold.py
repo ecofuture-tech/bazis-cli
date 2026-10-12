@@ -228,7 +228,8 @@ FastAPI and Pydantic.
   `.env` (not committed). Apps, including Bazis packages, are listed in `BS_INSTALLED_APPS`.
 - The MCP server `bazis` (`.mcp.json`) gives the catalog and the guides of the Bazis
   packages and the facts and checks of this project. Read the guide of a package before
-  using it, and run `python manage.py bazis_doctor` and the tests after every change.
+  using it, run `python manage.py bazis_doctor` after a change, and the tests once the
+  change is done.
 - Temporary files (scripts, outputs, screenshots) go to `.scratch/` (ignored by Git), not
   to `/tmp`. `.bazis/` (not committed) has the ports of the servers of the project on this
   machine (`ports.json`) and the facts of the last run of the `bazis` command (`run.json`).
@@ -253,10 +254,11 @@ FastAPI and Pydantic.
 AGENTS_MD_FRONTEND = '''
 ## Frontend
 
-The product has a frontend made by [bazis-front](https://github.com/ecofuture-tech/bazis-front)
-(`package_guide("bazis-front")` of the MCP server): the specs of the product in `spec/`,
-the contract generated from the backend in `contract/`, the React app in `frontend/` (the
-guide is `package_guide("bazis-front")`; `frontend/AGENTS.md` only points to its sections). Node.js 22.12 or newer with npm is needed for the frontend.
+The product has a frontend made by [bazis-front](https://github.com/ecofuture-tech/bazis-front):
+the specs of the product in `spec/`, the contract generated from the backend in
+`contract/`, the React app in `frontend/`. Its guide is `package_guide("bazis-front")` of
+the MCP server (`frontend/AGENTS.md` only points to its sections). Node.js 22.12 or newer
+with npm is needed for the frontend.
 
 - The backend is built to satisfy the specs. After every change of the models, routes,
   roles, statuses or transits: migrate, `python manage.py bazis_front contract`, then
@@ -268,9 +270,9 @@ guide is `package_guide("bazis-front")`; `frontend/AGENTS.md` only points to its
   `<app>/workflow.py`: `migrate` applies them. The test data of the end-to-end tests is `python manage.py e2e_data` (the e2e data command recommended by
   bazis-front): the test users of the roles of the specs, with the password of
   `E2E_PASSWORD`, and the records the scenarios need.
-- In `frontend/`: `npx tsc --noEmit`, `npm run lint`, `npm test`, and `npm run e2e` against
-  the running backend with that test data, on the ports of `.bazis/ports.json`
-  (`BAZIS_API_URL` of `frontend/.env.local`, `E2E_PORT`).
+- In `frontend/`: `npx tsc --noEmit`, `npm run lint`, `npm test`, `npm run build`, and
+  `npm run e2e` against the running backend with that test data, on the ports of
+  `.bazis/ports.json` (`BAZIS_API_URL` of `frontend/.env.local`, `E2E_PORT`).
 '''
 
 

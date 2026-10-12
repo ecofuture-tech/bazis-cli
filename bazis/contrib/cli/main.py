@@ -31,54 +31,35 @@ from claude_agent_sdk import ClaudeSDKError, CLIConnectionError
 from . import __version__, agent, scaffold
 
 
-#: the order of the work on a product with a frontend made by bazis-front
+#: the order of the work on a product with a frontend made by bazis-front: the steps of the
+#: guide of bazis-front, with what bazis-cli adds to them (the packages, `.venv`, the
+#: description, the ports, one look at the screens, the final checks of the rules)
 FRONTEND_STEPS = """\
-1. Read the introductions of the guides of the core and of bazis-front
-   (`package_guide("bazis")`, `package_guide("bazis-front")`) and the titles of their
-   sections, choose the Bazis packages the product needs (`list_packages`; the frontend
-   logs in with bazis-users, roles and access need bazis-permit, statuses and transits
-   bazis-statusy, files bazis-uploadable), install them and list their apps. Then create
-   the frontend with `.venv/bin/python manage.py bazis_front init` (`--preset portal` for a
-   product for the public, `workspace` for the staff): it writes `frontend/` and the
-   starters of `spec/`.
-2. Describe the product in `spec/product.yaml` from {source}: the roles (each with its
-   permit role and a `test_user`), the entities with their fields, the workflows of the
-   entities with statuses, the access of each role, and scenarios for the main tasks of
-   every role, including what a role may not do, and the `languages` and `language` of
-   the backend. Write the screens the scenarios use in `spec/screens/<id>.yaml`. Run
-   `front_check` and fix the errors of the shape and of the references.
-3. Make the backend satisfy the specs: the apps, models, route sets and routers; the
-   permit roles with the permissions of the access and the statuses and transits of the
-   workflows declared in `roles.py` and `workflow.py`; the e2e data command recommended by bazis-front,
-   `e2e_data`, with only the test users and the records the scenarios need; the tests
-   that the rules require (every rule of the description and every role, parallel
-   requests for every limit and uniqueness, at least 10); the translations of the backend in each language other than English; `makemigrations`;
-   `run_doctor` without errors.
-4. Migrate the database (`.venv/bin/python manage.py migrate`) and export the contract
-   (`.venv/bin/python manage.py bazis_front contract`).
-5. Run `front_check` and fix the spec or the backend as each `hint` says until it reports
-   no errors; export the contract again after every change of the backend.
-6. Choose the components with `front_catalog` and copy those the screens need
-   (`.venv/bin/python manage.py bazis_front add ...`), then write the screens in
-   `frontend/src/screens/<id>/` from their specs, composed from the components, with
-   their routes and navigation in `frontend/src/app/`, as the section "Writing the
-   screens" of the guide of bazis-front shows;
-   their texts go through `t()`, in the dictionaries of the product of every language.
-7. Write the design in `spec/design/` (the brand, the colors and the fonts that fit
-   {source}) and generate the theme (`.venv/bin/python manage.py bazis_front design`).
-8. Generate the end-to-end tests (`.venv/bin/python manage.py bazis_front e2e`), install
-   the browser once (`npx playwright install chromium` in `frontend/`) and run them
-   against the backend with its test data (`e2e_data`); fix the screens, the specs or the
-   backend until they pass.
-9. Look at the screens once: with the backend and `npm run dev` running, take a
-   screenshot of each screen as a role that uses it (into `.scratch/`) and fix what is
-   visibly broken. One pass, no second round of screenshots.
-10. Finish with one run of the final checks: `run_doctor`, the tests of the backend,
-    `front_check` without errors, `front_status` with nothing stale, and in `frontend/`
-    `npx tsc --noEmit`, `npm run lint`, `npm test`, `npm run build`, and `npm run e2e`
-    if a screen changed since it passed. Say how to run the backend
-    (`.venv/bin/uvicorn {name}.main:app --port <backend>`) and the frontend
-    (`npm run dev -- --port <frontend>` in `frontend/`) with the ports of the project.
+Follow the steps of "Building the frontend of a product" in the introduction of the guide
+of bazis-front (`package_guide("bazis-front")`), with the section of each step read when
+you reach it, and with what this product adds to them:
+
+- Before step 1, read the introduction of the guide of the core (`package_guide("bazis")`)
+  and choose the Bazis packages the product needs with `list_packages` (the frontend logs in
+  with bazis-users, roles and access need bazis-permit, statuses and transits
+  bazis-statusy, files bazis-uploadable). The commands of `manage.py` run with
+  `.venv/bin/python manage.py`.
+- Step 2: the specs describe {source}, with scenarios for the main tasks of every role,
+  including what a role may not do, and the `languages` and `language` of the backend; run
+  `front_check` and fix the errors of the shape and of the references before the backend.
+- Step 3: the backend also has the tests and the translations that the rules require,
+  `makemigrations` and `run_doctor` without errors.
+- Step 5 is `front_check`; step 6 chooses the components with `front_catalog`, and the texts
+  of the screens go through `t()`.
+- Step 7: the brand, the colors and the fonts of the design fit {source}.
+- Step 8: install the browser once (`npx playwright install chromium` in `frontend/`), and
+  fix the screens, the specs or the backend until the tests pass. Then look at the screens
+  once: with the backend and `npm run dev` running, take a screenshot of each screen as a
+  role that uses it (into `.scratch/`) and fix what is visibly broken. One pass, no second
+  round of screenshots.
+- Step 9 is a part of the final checks of the rules: run them once, at the end. Say how to
+  run the backend (`.venv/bin/uvicorn {name}.main:app --port <backend>`) and the frontend
+  (`npm run dev -- --port <frontend>` in `frontend/`) with the ports of the project.
 """
 
 
@@ -215,8 +196,7 @@ export the contract (`.venv/bin/python manage.py bazis_front contract`) and fix 
 or the backend until `front_check` reports no errors. With `front_catalog` find the
 components that need the capability of the package and copy those the screens need
 (`bazis_front add`), use them in the screens, generate the end-to-end tests again
-(`bazis_front e2e`), extend `e2e_data`, and run `npx tsc --noEmit`, `npm run lint`,
-`npm test` and `npm run e2e` in `frontend/`.
+(`bazis_front e2e`), extend `e2e_data`, and finish with the final checks of the rules.
 """
     elif args.package == 'bazis-front':
         frontend = True
@@ -232,28 +212,21 @@ def audit_task(args) -> agent.Task:
     project_dir = args.project_dir.resolve()
     frontend = has_frontend(project_dir)
     if args.fix:
-        action = 'Then fix the problems you are sure about and run the checks and the tests again.'
+        action = 'Then fix the problems you are sure about and run the final checks of the rules once.'
     else:
         action = 'Change nothing: this is a review.'
     steps = ''
     if frontend:
-        if args.fix:
-            run = (
-                'run `bazis_front contract --check`, `design --check` and `e2e --check`, and '
-                'in `frontend/` `npx tsc --noEmit`, `npm run lint`, `npm test` and '
-                '`npm run e2e` against the backend with its test data'
-            )
-        else:
-            run = (
-                'list the commands that this review cannot run: `npx tsc --noEmit`, '
-                '`npm run lint`, `npm test` and `npm run e2e` in `frontend/`'
-            )
+        cannot_run = '' if args.fix else (
+            '; list the checks of the frontend that this review cannot run: `npx tsc --noEmit`, '
+            '`npm run lint`, `npm test`, `npm run build` and `npm run e2e` in `frontend/`'
+        )
         steps = f"""\
 3. The frontend (bazis-front): run `front_check` and `front_status`, and compare `spec/`
    and `frontend/` with the guide of bazis-front (`package_guide("bazis-front")`;
    `frontend/AGENTS.md` only points to its sections): edited copies or generated files, roles or permission rules in
    the screens, literal colors, scenarios that miss a role or what it may not do, screens
-   that are not composed from the components; {run}.
+   that are not composed from the components{cannot_run}.
 """
     prompt = f"""\
 Audit this Bazis project.

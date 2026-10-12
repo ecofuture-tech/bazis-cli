@@ -38,7 +38,7 @@ Bazis. It is a tool for the developer's machine, not a dependency of a project.
 - `bazis add PACKAGE ["what for"]` installs a Bazis package and its Bazis dependencies and
   sets them up as their guides say. In a project with a frontend
   (`frontend/bazis-front.lock.json`) it then exports the contract, fixes `check`, copies
-  the components of the new capability and runs the frontend tests; `bazis add
+  the components of the new capability and runs the final checks; `bazis add
   bazis-front` builds the frontend of a backend.
 - `bazis audit [--fix]` reviews the project against the guides and checks of its packages
   and, with a frontend, `front_check`, `front_status` and the guides of bazis-front;
