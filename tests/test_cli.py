@@ -367,6 +367,47 @@ def test_scaffold_with_a_frontend_is_a_working_project(tmp_path):
     assert doctor(directory) == []
 
 
+#: the steps of the guide of bazis-front that FRONTEND_STEPS names: how each begins, and what
+#: it does
+FRONTEND_GUIDE_STEPS = {
+    1: ('Install bazis-front', 'bazis_front init'),
+    2: ('Describe the product', 'spec/product.yaml'),
+    3: ('Build the backend', 'roles.py'),
+    5: ('Run `python manage.py bazis_front check`', 'bazis_front check'),
+    6: ('Copy the components', 'frontend/src/screens/'),
+    7: ('Brand the design', 'bazis_front design'),
+    8: ('Generate the end-to-end tests', 'bazis_front e2e'),
+    9: ('Check the frontend', 'npx tsc'),
+}
+
+
+def test_frontend_steps_are_those_of_the_guide_of_bazis_front():
+    """
+    FRONTEND_STEPS refers to the steps of "Building the frontend of a product" in the
+    introduction of the guide of bazis-front by their numbers: they must be those steps.
+    """
+    pytest.importorskip('bazis.contrib.front')
+    import re
+    from importlib.resources import files
+
+    guide = (files('bazis.contrib.front') / 'AGENTS.md').read_text(encoding='utf-8')
+    introduction = guide.split('\n## ', 1)[0]
+    section = introduction.split('\n### Building the frontend of a product\n', 1)
+    assert len(section) == 2, 'the introduction has no "### Building the frontend of a product"'
+    steps = {
+        int(number): ' '.join(text.split())
+        for number, text in re.findall(
+            r'^(\d+)\. (.*?)(?=^\d+\. |^\S|\Z)', section[1].split('\n### ', 1)[0], re.M | re.S
+        )
+    }
+
+    named = {int(it) for it in re.findall(r'[Ss]tep (\d+)', main.FRONTEND_STEPS)}
+    assert named == set(FRONTEND_GUIDE_STEPS)
+    for number, (start, action) in FRONTEND_GUIDE_STEPS.items():
+        assert steps.get(number, '').startswith(start), (number, steps.get(number))
+        assert action in steps[number], (number, steps[number])
+
+
 def node_version(stdout: str, returncode: int = 0):
     def run(command, **kwargs):
         assert command == ['/usr/bin/node', '--version']
