@@ -1,6 +1,6 @@
 # bazis-cli
 
-The `bazis` command (`bazis new`, `bazis add`, `bazis audit`): Claude Code through the
+The `bazis` command (`bazis new`, `bazis add`, `bazis audit`, `bazis change`): Claude Code through the
 Claude Agent SDK, run in a Bazis project with the MCP server bazis-mcp and the rules of
 Bazis (`agent.RULES`).
 

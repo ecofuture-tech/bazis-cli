@@ -18,15 +18,18 @@ The `bazis` command:
 - `bazis new DIR "what the project does"` creates a product and builds its backend and,
   unless `--no-frontend`, its frontend;
 - `bazis add PACKAGE [what for]` adds a Bazis package to the project;
-- `bazis audit [--fix]` reviews the project against the guides and checks of its packages.
+- `bazis audit [--fix]` reviews the project against the guides and checks of its packages;
+- `bazis change ["what to change"]` changes the project in the session of the last run of
+  bazis in it, with one request or, without it, the requests typed one after another.
 """
 
 import argparse
 import asyncio
+import shlex
 import sys
 from pathlib import Path
 
-from claude_agent_sdk import ClaudeSDKError, CLIConnectionError
+from claude_agent_sdk import ClaudeSDKError, CLIConnectionError, ResultMessage
 
 from . import __version__, agent, scaffold
 
@@ -171,6 +174,22 @@ def has_frontend(project_dir: Path) -> bool:
     return (project_dir / 'frontend' / 'bazis-front.lock.json').is_file()
 
 
+def frontend_change(change: str) -> str:
+    """
+    What a prompt says about a change of a product with a frontend made by bazis-front:
+    `change` names what changes it (`the package`, `the change`).
+    """
+    return f"""
+The product has a frontend (bazis-front). Describe in `spec/` what {change} changes in the
+product (fields, workflows, access, scenarios, screens). After the backend: migrate,
+export the contract (`.venv/bin/python manage.py bazis_front contract`) and fix the spec
+or the backend until `front_check` reports no errors. With `front_catalog` find the
+components of what {change} adds and copy those the screens need (`bazis_front add`), use
+them in the screens, generate the end-to-end tests again (`bazis_front e2e`), extend
+`e2e_data`, and finish with the final checks of the rules.
+"""
+
+
 def add_task(args) -> agent.Task:
     project_dir = args.project_dir.resolve()
     goal = f' The project needs it for: {args.goal}' if args.goal else ''
@@ -189,15 +208,7 @@ make `run_doctor` pass without the warnings of the new packages.
         )
     frontend = has_frontend(project_dir)
     if frontend:
-        prompt += """
-The product has a frontend (bazis-front). Describe in `spec/` what the package changes in
-the product (fields, workflows, access, scenarios, screens). After the backend: migrate,
-export the contract (`.venv/bin/python manage.py bazis_front contract`) and fix the spec
-or the backend until `front_check` reports no errors. With `front_catalog` find the
-components that need the capability of the package and copy those the screens need
-(`bazis_front add`), use them in the screens, generate the end-to-end tests again
-(`bazis_front e2e`), extend `e2e_data`, and finish with the final checks of the rules.
-"""
+        prompt += frontend_change('the package')
     elif args.package == 'bazis-front':
         frontend = True
         source = 'the backend' + (' and what the project needs it for' if args.goal else '')
@@ -245,8 +256,71 @@ Audit this Bazis project.
     return _task(args, prompt, project_dir, writes=args.fix, frontend=frontend)
 
 
+def change_task(args, request: str, session: str | None) -> agent.Task:
+    """
+    A request of `bazis change`: in the `session` that it continues, as it is (the session
+    has the project and the steps already); in a new session, with the preparation.
+    """
+    project_dir = args.project_dir.resolve()
+    frontend = has_frontend(project_dir)
+    if session:
+        prompt = f'{request}\n\nAfter the change, run the final checks of the rules once.\n'
+    else:
+        prompt = f"""\
+Change this Bazis project: {request}
+
+The project exists: read `project_info` and the guides of the packages the change concerns
+(`package_guide`; `list_packages` for a package it needs that is not installed). Change the
+models, routes, translations and tests it concerns, with new migrations, and test the
+rules it adds.
+"""
+        if frontend:
+            prompt += frontend_change('the change')
+            prompt += f'\n{ports_text(scaffold.project_ports(project_dir))}\n'
+        else:
+            prompt += '\nFinish with the final checks of the rules.\n'
+    return _task(args, prompt, project_dir, frontend=frontend, session_id=session)
+
+
+def change(args) -> int:
+    """
+    `bazis change`: the request, or without it the requests typed in the terminal, each
+    run in the session of the run before it, from the session of the last run of bazis in
+    the project (a new one with `--new-session` or when it cannot be resumed).
+    """
+    session = None if args.new_session else agent.last_session(args.project_dir.resolve())
+    if args.request:
+        return run(change_task(args, args.request, session))[0]
+    if not sys.stdin.isatty():
+        print(
+            'bazis: no terminal to type the changes in: pass the change, bazis change "..."',
+            file=sys.stderr,
+        )
+        return 1
+    print('Type a change of the project; an empty line, exit or Ctrl-D ends.', file=sys.stderr)
+    while True:
+        try:
+            request = input('\nchange> ').strip()
+        except EOFError:
+            return 0
+        except KeyboardInterrupt:
+            return 130
+        if request in ('', 'exit'):
+            return 0
+        code, result = run(change_task(args, request, session))
+        if code == 130:
+            print('\nbazis: interrupted', file=sys.stderr)
+        elif result is not None:
+            session = result.session_id
+
+
 def _task(
-    args, prompt: str, project_dir: Path, writes: bool = True, frontend: bool = False
+    args,
+    prompt: str,
+    project_dir: Path,
+    writes: bool = True,
+    frontend: bool = False,
+    session_id: str | None = None,
 ) -> agent.Task:
     if frontend and writes and (problem := scaffold.node_problem()):
         print(f'bazis: warning: {problem}; the agent skips the steps that need it.', file=sys.stderr)
@@ -259,6 +333,7 @@ def _task(
         max_budget_usd=args.budget,
         yes=args.yes,
         extra_rules=[agent.FRONTEND_RULES] if frontend else [],
+        session_id=session_id,
     )
 
 
@@ -278,7 +353,7 @@ def parser() -> argparse.ArgumentParser:
 
     project = argparse.ArgumentParser(add_help=False)
     project.add_argument(
-        '--project-dir', type=Path, default=Path.cwd(),
+        '--project-dir', type=Path, default=Path('.'),
         help='The directory of manage.py (default: the current directory).',
     )
 
@@ -313,16 +388,28 @@ def parser() -> argparse.ArgumentParser:
     audit = commands.add_parser('audit', parents=[common, project], help='Review the project.')
     audit.add_argument('--fix', action='store_true', help='Also fix the problems.')
     audit.set_defaults(make_task=audit_task)
+
+    change = commands.add_parser(
+        'change', parents=[common, project],
+        help='Change the project, in the session of the last run of bazis in it.',
+    )
+    change.add_argument(
+        'request', nargs='?',
+        help='What to change, in your words (without it, the changes are typed in the '
+        'terminal one after another).',
+    )
+    change.add_argument(
+        '--new-session', action='store_true',
+        help='Start a new session instead of continuing that of the last run.',
+    )
     return root
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = parser().parse_args(argv)
-    try:
-        task = args.make_task(args)
-    except scaffold.ScaffoldError as err:
-        print(f'bazis: {err}', file=sys.stderr)
-        return 1
+def run(task: agent.Task) -> tuple[int, ResultMessage | None]:
+    """
+    Runs the agent of a task and reports the end of the run: the exit code (130 when
+    interrupted) and the result of the agent.
+    """
     try:
         result = asyncio.run(agent.run(task))
     except ClaudeSDKError as err:
@@ -333,18 +420,36 @@ def main(argv: list[str] | None = None) -> int:
                 'ANTHROPIC_API_KEY.',
                 file=sys.stderr,
             )
-        return 1
+        return 1, None
     except KeyboardInterrupt:
-        return 130
+        return 130, None
     if result is None:
         print('bazis: the agent ended without a result', file=sys.stderr)
-        return 1
-    cost = f', ${result.total_cost_usd:.2f}' if result.total_cost_usd is not None else ''
+        return 1, None
+    cost = agent.last_run(task.project_dir)['cost_usd']
+    cost = f', ${cost:.2f}' if cost is not None else ''
     print(f'\n[{result.num_turns} turns{cost}]', file=sys.stderr)
     if result.is_error:
         print(f'bazis: {agent.error_text(result)}', file=sys.stderr)
+        return 1, result
+    return 0, result
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parser().parse_args(argv)
+    if args.command == 'change':
+        return change(args)
+    try:
+        task = args.make_task(args)
+    except scaffold.ScaffoldError as err:
+        print(f'bazis: {err}', file=sys.stderr)
         return 1
-    return 0
+    code, result = run(task)
+    if result is not None and args.command in ('new', 'add'):
+        directory = args.directory if args.command == 'new' else args.project_dir
+        cd = '' if directory == Path('.') else f'cd {shlex.quote(str(directory))} && '
+        print(f'To change the project: {cd}bazis change', file=sys.stderr)
+    return code
 
 
 if __name__ == '__main__':

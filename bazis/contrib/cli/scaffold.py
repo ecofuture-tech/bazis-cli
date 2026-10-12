@@ -232,7 +232,8 @@ FastAPI and Pydantic.
   change is done.
 - Temporary files (scripts, outputs, screenshots) go to `.scratch/` (ignored by Git), not
   to `/tmp`. `.bazis/` (not committed) has the ports of the servers of the project on this
-  machine (`ports.json`) and the facts of the last run of the `bazis` command (`run.json`).
+  machine (`ports.json`) and the facts of the last run of the `bazis` command (`run.json`,
+  with the session that `bazis change` continues).
 - PostgreSQL with PostGIS and Redis are required to run the project and the tests
   (`.env`); the checks and `makemigrations` work without them. The tests share Redis: they
   never flush it, their cache keys have a prefix of their own (`tests/conftest.py`).

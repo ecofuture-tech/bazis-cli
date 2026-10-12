@@ -8,6 +8,7 @@ solves = [
     "create a Bazis product from a description of what it does: the backend, and its frontend made by bazis-front (specs, contract, screens, design, end-to-end tests)",
     "add a Bazis package to a project and set it up, in the backend and the frontend",
     "review a project against the guides and checks of its Bazis packages and of its frontend",
+    "go on changing a project with requests, in the session of the agent that built it",
 ]
 requires = ["bazis-mcp"]
 pairs_well = ["bazis-front"]
@@ -24,6 +25,9 @@ use_when = "run the agent of a command from Python (bazis.contrib.cli.agent.run)
 
 [[pitfalls]]
 text = "the agent spends API credits of the account of Claude Code; limit a run with --budget"
+
+[[pitfalls]]
+text = "bazis change continues the session of the last run of bazis in the project (.bazis/run.json) only on the machine whose Claude Code has its transcript; elsewhere, or with --new-session, it starts a new session that learns the project first"
 
 [[pitfalls]]
 text = "the system checks run the project code with its .venv, also in a read-only audit: use bazis in trusted projects"

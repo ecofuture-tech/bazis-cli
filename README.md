@@ -35,6 +35,10 @@ bazis add bazis-statusy "orders go through new -> paid -> shipped"
 # a review against the guides and checks of the packages; --fix also fixes
 bazis audit
 bazis audit --fix
+
+# go on changing the project, in the session of the last run of bazis in it
+bazis change "loans of rare books need an approval of a librarian"
+bazis change          # the changes typed one after another; an empty line ends
 ```
 
 - `bazis new DIR DESCRIPTION` writes the skeleton of a project: the project package
@@ -63,11 +67,18 @@ bazis audit --fix
   `bazis add bazis-front` builds the frontend of a backend.
 - `bazis audit [--fix]` reports the problems of the project by severity, with the checks
   of the frontend when it has one. Without `--fix` the agent can only read.
+- `bazis change [REQUEST]` changes the project as the request says, in the session of
+  Claude Code of the last run of bazis in the project (`bazis new` prints the command):
+  the agent remembers what it built and what was asked before. Without a request the
+  changes are typed in the terminal one after another, each in the same session; an
+  empty line, `exit` or Ctrl-D ends, Ctrl-C stops the change that runs. `--new-session`
+  (or a session whose transcript is not on this machine) starts a new session, in which
+  the agent first learns the project. `--budget` limits every change.
 
-Every command writes the facts of its run (turns, cost, duration, tokens, calls of each
-tool) to `.bazis/run.json` of the project; `.bazis/` is never committed.
+Every command writes the facts of its run (session, turns, cost, duration, tokens, calls
+of each tool) to `.bazis/run.json` of the project; `.bazis/` is never committed.
 
-Options of every command: `--project-dir` (`add`, `audit`; default: the current
+Options of every command: `--project-dir` (`add`, `audit`, `change`; default: the current
 directory), `--model` (default `claude-opus-5-5`), `--effort` (`low` ... `max`, default
 `high`), `--budget USD`, `--yes`.
 

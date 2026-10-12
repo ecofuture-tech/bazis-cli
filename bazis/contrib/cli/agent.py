@@ -37,6 +37,7 @@ from claude_agent_sdk import (
     ResultMessage,
     TextBlock,
     ToolUseBlock,
+    get_session_info,
     query,
 )
 from claude_agent_sdk.types import CanUseToolShadowedWarning
@@ -52,7 +53,7 @@ GIT_DENY = ['Bash(git commit:*)', 'Bash(git push:*)', 'Bash(git reset:*)', 'Bash
 #: tools a review cannot use
 WRITE_TOOLS = ['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Bash', 'WebFetch', 'WebSearch']
 #: the facts of the last run, in the local directory of the project (`scaffold.local_dir`),
-#: for the user and the measurements of the runs
+#: for the user, the measurements of the runs and the session that `bazis change` continues
 RUN_FILE = 'run.json'
 GIT_COMMAND_RE = re.compile(r'(^|[;&|(]\s*)git\s+(commit|push|reset|rebase)\b', re.MULTILINE)
 
@@ -270,6 +271,8 @@ class Task:
     #: run shell commands without asking
     yes: bool = False
     extra_rules: list[str] = field(default_factory=list)
+    #: the session of Claude Code that the task continues (`last_session`), else a new one
+    session_id: str | None = None
 
 
 def mcp_server(project_dir: Path) -> dict:
@@ -302,6 +305,10 @@ def options(task: Task, asker: 'Asker | None' = None) -> ClaudeAgentOptions:
     asked: shell commands through a PreToolUse hook (the CLI would otherwise allow commands
     such as `rm` or `sed` in `acceptEdits` mode), the other tools through `can_use_tool`.
     In both, `.env` cannot be read and git cannot change the repository.
+
+    A task with a `session_id` resumes that session with these options: the rules of this
+    run replace those the session recorded (`snapshot` off), and the budget counts only
+    this run.
     """
     rules = '\n'.join([RULES, *task.extra_rules])
     secrets = [_path_rule(tool, task.project_dir / '.env') for tool in ('Read', 'Edit')]
@@ -310,10 +317,13 @@ def options(task: Task, asker: 'Asker | None' = None) -> ClaudeAgentOptions:
         model=task.model,
         effort=task.effort,
         max_budget_usd=task.max_budget_usd,
+        resume=task.session_id,
         mcp_servers={'bazis': mcp_server(task.project_dir)},
         strict_mcp_config=True,
         setting_sources=[],
-        system_prompt={'type': 'preset', 'preset': 'claude_code', 'append': rules},
+        system_prompt={
+            'type': 'preset', 'preset': 'claude_code', 'append': rules, 'snapshot': False,
+        },
         allowed_tools=['mcp__bazis'],
     )
     if not task.writes:
@@ -419,19 +429,52 @@ def render(message, out: TextIO | None = None, tools: Counter | None = None) -> 
     return None
 
 
-def write_run(task: Task, result: ResultMessage, tools: Counter, started: datetime) -> None:
+def last_run(project_dir: Path) -> dict:
     """
-    Writes the facts of a run as JSON to RUN_FILE of the project: the turns, the cost, the
-    duration, the usage of the tokens and the calls of each tool.
+    The facts of the last run in the project (RUN_FILE), empty without them.
     """
+    try:
+        return json.loads((project_dir / scaffold.LOCAL_DIR / RUN_FILE).read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return {}
+
+
+def last_session(project_dir: Path) -> str | None:
+    """
+    The session of the last run in the project when Claude Code can resume it (its
+    transcript is on this machine), else None.
+    """
+    session = last_run(project_dir).get('session_id')
+    if session and get_session_info(session, directory=str(project_dir)) is not None:
+        return session
+    return None
+
+
+def write_run(
+    task: Task, result: ResultMessage, tools: Counter, started: datetime, before: dict
+) -> None:
+    """
+    Writes the facts of a run as JSON to RUN_FILE of the project: the session, the turns,
+    the cost, the duration, the usage of the tokens and the calls of each tool. A resumed
+    session reports the cost of the whole session: the cost of the run is what it adds to
+    the cost of the session in the facts of the run `before`.
+    """
+    cost = result.total_cost_usd
+    if task.session_id and before.get('session_id') == task.session_id:
+        spent = before.get('session_cost_usd')
+        # a session whose transcript has no total starts again from zero
+        if cost is not None and spent is not None and spent <= cost:
+            cost -= spent
     facts = {
         'started': started.isoformat(timespec='seconds'),
         'model': task.model,
         'effort': task.effort,
+        'session_id': result.session_id,
         'subtype': result.subtype,
         'error': error_text(result) if result.is_error else None,
         'turns': result.num_turns,
-        'cost_usd': result.total_cost_usd,
+        'cost_usd': cost,
+        'session_cost_usd': result.total_cost_usd,
         'duration_ms': result.duration_ms,
         'duration_api_ms': result.duration_api_ms,
         'usage': result.usage,
@@ -450,6 +493,7 @@ async def run(task: Task, out: TextIO | None = None) -> ResultMessage | None:
     result = None
     tools = Counter()
     started = datetime.now(UTC)
+    before = last_run(task.project_dir)
     # the read-only MCP tools of bazis-mcp are allowed in advance on purpose
     warnings.filterwarnings('ignore', category=CanUseToolShadowedWarning)
     try:
@@ -461,7 +505,7 @@ async def run(task: Task, out: TextIO | None = None) -> ResultMessage | None:
         if result is None:
             raise
     if result is not None:
-        write_run(task, result, tools, started)
+        write_run(task, result, tools, started, before)
     return result
 
 

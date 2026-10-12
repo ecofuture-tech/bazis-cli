@@ -43,6 +43,15 @@ Bazis. It is a tool for the developer's machine, not a dependency of a project.
 - `bazis audit [--fix]` reviews the project against the guides and checks of its packages
   and, with a frontend, `front_check`, `front_status` and the guides of bazis-front;
   without `--fix` the agent can only read (it lists the frontend commands it could not run).
+- `bazis change ["what to change"]` changes the project in the session of Claude Code of
+  the last run of bazis in it (`session_id` of `.bazis/run.json`, resumed when Claude Code
+  has its transcript on this machine), so the agent keeps what it built and was asked;
+  without a request the changes are typed in the terminal one after another, each in the
+  same session (an empty line, `exit` or Ctrl-D ends; Ctrl-C stops the running change and
+  keeps the session; without a terminal the request is needed). A new session
+  (`--new-session`, or none to resume) first reads `project_info` and the guides of the
+  packages concerned and, with a frontend, follows the steps of `bazis add`. A resumed
+  session gets the rules of the current run, and `--budget` limits each change.
 
 The agent reads the introduction of a guide and its sections when a step needs them, reads
 the sources of the packages only for a fact the guides lack, runs the final checks once
@@ -50,8 +59,9 @@ the sources of the packages only for a fact the guides lack, runs the final chec
 Run, Outside the files, Left for you, Guide gaps. The servers of a project use its ports
 of `.bazis/ports.json` (`frontend/.env.local` has `BAZIS_API_URL`), and its files go to
 `media/` and `static/` of the project (`BS_MEDIA_ROOT`, `BS_STATIC_ROOT` in `.env`).
-Every command writes the facts of its run to `.bazis/run.json`: the turns, the cost, the
-duration, the usage of the tokens and the calls of each tool. `.bazis/` ignores itself in
+Every command writes the facts of its run to `.bazis/run.json`: the session, the turns, the
+cost (in a resumed session, that of the run, and `session_cost_usd` that of the session),
+the duration, the usage of the tokens and the calls of each tool. `.bazis/` ignores itself in
 Git.
 
 bazis-cli only orchestrates: the frontend logic (template, contract, specs, components,
@@ -61,7 +71,7 @@ the prompts and the rules (`agent.FRONTEND_RULES`). `BAZIS_FRONT_REQUIREMENT` (a
 wheel or a checkout, or a URL) replaces the requirement of bazis-front in a new product, to
 try a version that is not on PyPI.
 
-Options: `--project-dir` (default: the current directory), `--model` (default
+Options: `--project-dir` (`add`, `audit`, `change`; default: the current directory), `--model` (default
 `claude-opus-5-5`), `--effort` (default `high`), `--budget USD`, `--yes` (run shell commands
 without asking).
 

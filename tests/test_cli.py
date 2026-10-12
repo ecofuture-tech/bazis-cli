@@ -1165,3 +1165,179 @@ def test_new_in_a_directory_with_files(tmp_path, fake_agent, capsys):
     assert main.main(['new', str(tmp_path), 'anything', '--no-venv']) == 1
     assert 'is not empty' in capsys.readouterr().err
     assert fake_agent == []
+
+
+def test_new_says_how_to_change_the_project(tmp_path, fake_agent, capsys):
+    """
+    After `bazis new` and `bazis add` the user is told how to go on changing the project,
+    with the directory he gave.
+    """
+    directory = tmp_path / 'my library'
+    assert main.main(['new', str(directory), 'A library', '--no-venv', '--no-frontend']) == 0
+    assert f"To change the project: cd '{directory}' && bazis change" in capsys.readouterr().err
+
+    assert main.main(['add', 'bazis-permit', '--project-dir', str(directory)]) == 0
+    assert f"cd '{directory}' && bazis change" in capsys.readouterr().err
+
+
+def test_add_in_the_project_says_how_to_change_it(tmp_path, fake_agent, capsys, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    assert main.main(['add', 'bazis-permit']) == 0
+    assert 'To change the project: bazis change\n' in capsys.readouterr().err
+    assert fake_agent[0][1].cwd == str(tmp_path.resolve())
+
+
+@pytest.fixture
+def sessions(monkeypatch):
+    """
+    The sessions whose transcripts Claude Code has on this machine.
+    """
+    known = set()
+    monkeypatch.setattr(
+        agent, 'get_session_info',
+        lambda session_id, directory: object() if session_id in known else None,
+    )
+    return known
+
+
+def test_change(tmp_path, fake_agent, sessions, capsys):
+    """
+    A change continues the session of the last run of bazis in the project when Claude Code
+    can resume it: the request goes as it is. In a new session (none, one that cannot be
+    resumed, `--new-session`) the agent first learns the project.
+    """
+    project = ['--project-dir', str(tmp_path), '--yes']
+
+    # no run yet: a new session with the preparation
+    assert main.main(['change', 'Loans last two weeks', *project]) == 0
+    prompt, options = fake_agent[-1]
+    assert options.resume is None
+    assert 'Change this Bazis project: Loans last two weeks' in prompt
+    assert 'project_info' in prompt and 'Finish with the final checks of the rules' in prompt
+    assert options.permission_mode == 'acceptEdits'
+    assert 'Bash(git push:*)' in options.disallowed_tools
+    assert agent.FRONTEND_RULES not in options.system_prompt['append']
+    facts = json.loads((tmp_path / scaffold.LOCAL_DIR / agent.RUN_FILE).read_text())
+    assert facts['session_id'] == 's'
+
+    # the session of the last run, but its transcript is not on this machine
+    assert main.main(['change', 'Add the authors', *project]) == 0
+    assert fake_agent[-1][1].resume is None
+    assert 'Change this Bazis project' in fake_agent[-1][0]
+
+    sessions.add('s')
+    assert main.main(['change', 'Add the authors', *project, '--budget', '2']) == 0
+    prompt, options = fake_agent[-1]
+    assert options.resume == 's' and options.max_budget_usd == 2
+    assert prompt == 'Add the authors\n\nAfter the change, run the final checks of the rules once.\n'
+
+    assert main.main(['change', 'Add the authors', *project, '--new-session']) == 0
+    assert fake_agent[-1][1].resume is None
+    assert 'Change this Bazis project' in fake_agent[-1][0]
+    assert 'To change the project' not in capsys.readouterr().err
+
+
+def test_change_of_a_product_with_a_frontend(tmp_path, fake_agent, sessions):
+    """
+    The preparation of a change of a product with a frontend has the steps of `bazis add`
+    and the ports; the rules of the frontend apply in every session.
+    """
+    assert main.main(['change', 'Loans of rare books need an approval',
+                      '--project-dir', str(with_frontend(tmp_path))]) == 0
+
+    prompt, options = fake_agent[-1]
+    assert main.frontend_change('the change') in prompt
+    assert main.ports_text(scaffold.project_ports(tmp_path)) in prompt
+    assert 'Finish with the final checks' not in prompt
+    assert agent.FRONTEND_RULES in options.system_prompt['append']
+
+    sessions.add('s')
+    assert main.main(['change', 'Show the approvals', '--project-dir', str(tmp_path)]) == 0
+    prompt, options = fake_agent[-1]
+    assert options.resume == 's' and 'bazis_front' not in prompt
+    assert agent.FRONTEND_RULES in options.system_prompt['append']
+
+
+def test_options_of_a_resumed_session(tmp_path):
+    """
+    A resumed session gets the rules of this run, not those it recorded.
+    """
+    options = agent.options(agent.Task('build', tmp_path, session_id='s'))
+    assert options.resume == 's'
+    assert options.system_prompt['snapshot'] is False
+    assert options.setting_sources == [] and options.strict_mcp_config is True
+
+
+def session_agent(monkeypatch, results: list):
+    """
+    Replaces the Claude Agent SDK with an agent whose runs end with `results`, in turn: a
+    ResultMessage, or an exception it raises. Returns the recorded calls.
+    """
+    calls = []
+
+    async def query(prompt, options):
+        calls.append((prompt, options))
+        outcome = results.pop(0)
+        if isinstance(outcome, BaseException):
+            raise outcome
+        yield outcome
+
+    monkeypatch.setattr(agent, 'query', query)
+    return calls
+
+
+def test_cost_of_a_run_in_a_resumed_session(tmp_path, monkeypatch, sessions, capsys):
+    """
+    Claude Code reports the cost of the whole resumed session: the run costs what it adds.
+    """
+    session_agent(monkeypatch, [result_message(total_cost_usd=0.5),
+                                result_message(total_cost_usd=0.8, num_turns=2)])
+    sessions.add('s')
+    project = ['--project-dir', str(tmp_path)]
+
+    assert main.main(['change', 'Loans last two weeks', *project]) == 0
+    assert main.main(['change', 'Add the authors', *project]) == 0
+
+    assert '[2 turns, $0.30]' in capsys.readouterr().err
+    facts = json.loads((tmp_path / scaffold.LOCAL_DIR / agent.RUN_FILE).read_text())
+    assert facts['cost_usd'] == pytest.approx(0.3) and facts['session_cost_usd'] == 0.8
+
+
+def test_change_in_the_terminal(tmp_path, monkeypatch, sessions, capsys):
+    """
+    Without a request the changes are typed one after another, each in the session of the
+    run before it; a failed or interrupted run does not end the work, an empty line does.
+    """
+    calls = session_agent(monkeypatch, [
+        result_message(session_id='a', is_error=True, subtype='error_max_budget_usd', result=None),
+        KeyboardInterrupt(),
+        result_message(session_id='a', total_cost_usd=0.75),
+    ])
+    monkeypatch.setattr(sys, 'stdin', FakeTerminal('Loans last two weeks\nAdd the authors\n'
+                                                   '  Add the reviews  \n\nnot asked\n'))
+
+    assert main.main(['change', '--project-dir', str(tmp_path), '--new-session']) == 0
+
+    assert [prompt.split('\n')[0] for prompt, _ in calls] == [
+        'Change this Bazis project: Loans last two weeks', 'Add the authors', 'Add the reviews',
+    ]
+    assert [options.resume for _, options in calls] == [None, 'a', 'a']
+    out = capsys.readouterr()
+    assert out.out.count('change> ') == 4
+    assert 'the budget (--budget) is spent' in out.err
+    assert 'interrupted' in out.err
+    assert '[3 turns, $0.25]' in out.err
+
+
+@pytest.mark.parametrize('typed, code', [('exit\n', 0), ('', 0)])
+def test_change_in_the_terminal_ends(tmp_path, fake_agent, monkeypatch, typed, code):
+    monkeypatch.setattr(sys, 'stdin', FakeTerminal(typed))
+    assert main.main(['change', '--project-dir', str(tmp_path)]) == code
+    assert fake_agent == []
+
+
+def test_change_without_a_terminal(tmp_path, fake_agent, monkeypatch, capsys):
+    monkeypatch.setattr(sys, 'stdin', FakeTerminal('Add the authors\n', tty=False))
+    assert main.main(['change', '--project-dir', str(tmp_path)]) == 1
+    assert 'bazis change "..."' in capsys.readouterr().err
+    assert fake_agent == []
