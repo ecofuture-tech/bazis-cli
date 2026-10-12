@@ -592,7 +592,7 @@ def create_venv(directory: Path, run=subprocess.run) -> Path:
     """
     directory = directory.resolve()  # the commands run in it
     venv = directory / '.venv'
-    python = venv / ('Scripts/python.exe' if sys.platform == 'win32' else 'bin/python')
+    python = directory / VENV_BIN / f'python{EXE}'
     uv = shutil.which('uv')
     if uv:
         # a bazis-front from FRONTEND_REQUIREMENT_ENV, such as a checkout, is built again:

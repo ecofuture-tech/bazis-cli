@@ -731,7 +731,7 @@ def test_new(tmp_path, fake_agent, capsys, environment):
     assert '> Bash .venv/bin/python manage.py check' in out.out
     assert '[3 turns, $0.50]' in out.err
     # the facts of the run, for the measurements
-    facts = json.loads((directory / agent.RUN_FILE).read_text())
+    facts = json.loads((directory / scaffold.LOCAL_DIR / agent.RUN_FILE).read_text())
     assert facts['turns'] == 3 and facts['cost_usd'] == 0.5 and facts['duration_ms'] == 1
     assert facts['tools'] == {'package_guide': 1, 'Bash': 1}
     assert facts['model'] == agent.DEFAULT_MODEL and facts['error'] is None
@@ -1101,7 +1101,7 @@ def test_failed_run(tmp_path, monkeypatch, capsys):
     assert 'the budget (--budget) is spent' in err
     assert '[3 turns, $0.50]' in err
     assert 'claude login' not in err
-    facts = json.loads((tmp_path / agent.RUN_FILE).read_text())
+    facts = json.loads((tmp_path / scaffold.LOCAL_DIR / agent.RUN_FILE).read_text())
     assert facts['subtype'] == 'error_max_budget_usd'
     assert facts['error'] == 'the budget (--budget) is spent'
 

@@ -51,8 +51,9 @@ DEFAULT_EFFORT = 'high'
 GIT_DENY = ['Bash(git commit:*)', 'Bash(git push:*)', 'Bash(git reset:*)', 'Bash(git rebase:*)']
 #: tools a review cannot use
 WRITE_TOOLS = ['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Bash', 'WebFetch', 'WebSearch']
-#: the facts of the last run in the project, for the user and the measurements of the runs
-RUN_FILE = f'{scaffold.LOCAL_DIR}/run.json'
+#: the facts of the last run, in the local directory of the project (`scaffold.local_dir`),
+#: for the user and the measurements of the runs
+RUN_FILE = 'run.json'
 GIT_COMMAND_RE = re.compile(r'(^|[;&|(]\s*)git\s+(commit|push|reset|rebase)\b', re.MULTILINE)
 
 RULES = """\
@@ -428,7 +429,7 @@ def write_run(task: Task, result: ResultMessage, tools: Counter, started: dateti
         'model_usage': result.model_usage,
         'tools': dict(tools.most_common()),
     }
-    path = scaffold.local_dir(task.project_dir) / 'run.json'
+    path = scaffold.local_dir(task.project_dir) / RUN_FILE
     path.write_text(json.dumps(facts, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
 
 
