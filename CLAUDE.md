@@ -7,7 +7,12 @@ Bazis (`bazis.contrib.mcp.rules.RULES`).
 - `bazis/contrib/cli/main.py` — the commands, with the tasks of `bazis.contrib.mcp.prompts`
   (and the prompt of `bazis audit`);
 - `bazis/contrib/cli/agent.py` — the options of the agent (tools, permissions, MCP server),
-  the permission prompt in the terminal and the output.
+  the permission prompt in the terminal and the output. Of the tools of bazis-mcp only
+  those that read (`MCP_READ_TOOLS`) are allowed in advance; those for a client without a
+  shell (`MCP_WORK_TOOLS`) are never given to the agent, which runs commands and edits
+  files itself (`MCP_RULE` tells it that the instructions of the server about them do not
+  apply). A test compares both lists with the annotations (`readOnlyHint`) of the installed
+  bazis-mcp: classify a new tool there.
 
 The skeleton of a new project and its `.venv` (bazis-front in its requirements and apps
 unless `--no-frontend`, its languages: `--language`, else English until the agent sets the

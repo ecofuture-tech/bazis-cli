@@ -90,19 +90,26 @@ def environment(monkeypatch):
     return calls
 
 
+#: the tools of bazis-mcp that the agent never gets
+MCP_WORK = [f'mcp__bazis__{name}' for name in agent.MCP_WORK_TOOLS]
+
+
 def test_options_of_a_task_that_writes(tmp_path):
     options = agent.options(agent.Task('build', tmp_path, model='claude-sonnet-5-5'))
 
     assert options.cwd == str(tmp_path)
     assert options.model == 'claude-sonnet-5-5'
     assert options.permission_mode == 'acceptEdits'
-    # only the MCP tools are allowed in advance: edits outside the project, reads outside
-    # it and everything else reach can_use_tool, shell commands the Bash hook
-    assert options.allowed_tools == ['mcp__bazis']
+    # only the MCP tools that read are allowed in advance: edits outside the project, reads
+    # outside it and everything else reach can_use_tool, shell commands the Bash hook
+    assert options.allowed_tools == [f'mcp__bazis__{name}' for name in agent.MCP_READ_TOOLS]
     assert options.can_use_tool is not None
     assert options.hooks['PreToolUse'][0].matcher == 'Bash'
     assert f'Read(/{tmp_path.resolve()}/.env)' in options.disallowed_tools
     assert 'Bash(git push:*)' in options.disallowed_tools
+    # the agent runs the commands and changes the files itself, never through bazis-mcp
+    assert set(MCP_WORK) <= set(options.disallowed_tools)
+    assert agent.MCP_RULE in options.system_prompt['append']
     # no settings or MCP servers of the project
     assert options.strict_mcp_config is True
     assert options.setting_sources == []
@@ -117,9 +124,47 @@ def test_options_of_a_read_only_task(tmp_path):
     assert options.permission_mode == 'dontAsk'
     assert options.can_use_tool is None
     assert not options.hooks
-    assert options.allowed_tools == ['mcp__bazis']
+    assert options.allowed_tools == [f'mcp__bazis__{name}' for name in agent.MCP_READ_TOOLS]
     assert {'Write', 'Edit', 'Bash', 'WebFetch'} <= set(options.disallowed_tools)
+    assert set(MCP_WORK) <= set(options.disallowed_tools)
     assert f'Read(/{tmp_path.resolve()}/.env)' in options.disallowed_tools
+
+
+@pytest.mark.anyio
+async def test_mcp_tools_are_those_of_bazis_mcp():
+    """
+    The tools of the bazis-mcp installed: those allowed in advance are those that only read,
+    those never given those that write or run; a new tool fails here until it is in one list.
+    """
+    from mcp import Client
+
+    from bazis.contrib.mcp.server import server
+
+    async with Client(server) as client:
+        tools = (await client.list_tools()).tools
+    read = {tool.name for tool in tools if tool.annotations and tool.annotations.read_only_hint}
+
+    assert read == set(agent.MCP_READ_TOOLS)
+    assert {tool.name for tool in tools} - read == set(agent.MCP_WORK_TOOLS)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize('writes', [False, True])
+async def test_a_new_mcp_tool_is_not_allowed(tmp_path, writes):
+    """
+    A tool of bazis-mcp in neither list: a read-only task denies it (`dontAsk`), a task that
+    writes asks the user (here: no terminal, denied).
+    """
+    tool = 'mcp__bazis__new_tool'
+    asker = agent.Asker(False, stdin=FakeTerminal('', tty=False))
+    options = agent.options(agent.Task('task', tmp_path, writes=writes), asker)
+
+    assert tool not in options.allowed_tools and tool not in options.disallowed_tools
+    if writes:
+        assert options.permission_mode == 'acceptEdits'
+        assert isinstance(await options.can_use_tool(tool, {}, None), PermissionResultDeny)
+    else:
+        assert options.permission_mode == 'dontAsk' and options.can_use_tool is None
 
 
 class FakeTerminal(io.StringIO):

@@ -93,9 +93,14 @@ directory), `--model` (default `claude-opus-5-5`), `--effort` (`low` ... `max`, 
   and commit them yourself.
 - Only the settings of bazis-cli apply: the Claude Code settings, hooks and MCP servers of
   the project and of the user are not loaded.
-- `bazis audit` without `--fix` can only read the project and call bazis-mcp. bazis-mcp
-  runs the system checks of the project, that is the project code with its `.venv`: run
-  the commands only in projects you trust.
+- The agent calls only the tools of bazis-mcp that read (the catalog, the guides, the facts
+  and checks of the project, its files), without asking. Those for a client without a shell
+  (`run_command`, `start_server`, `stop_server`, `add_packages`, `write_file`,
+  `create_project`, `use_project`, `install_tools`) are not given to it: its commands and
+  edits are those above. A tool of a newer bazis-mcp is asked like any other.
+- `bazis audit` without `--fix` can only read the project and call the tools of bazis-mcp
+  that read. bazis-mcp runs the system checks of the project, that is the project code with
+  its `.venv`: run the commands only in projects you trust.
 
 The tests of a project need PostgreSQL with PostGIS and Redis (settings in `.env`); without
 them the agent creates the migrations and runs the system checks, and says that the tests

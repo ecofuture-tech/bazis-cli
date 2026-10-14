@@ -53,6 +53,28 @@ DEFAULT_EFFORT = 'high'
 GIT_DENY = ['Bash(git commit:*)', 'Bash(git push:*)', 'Bash(git reset:*)', 'Bash(git rebase:*)']
 #: tools a review cannot use
 WRITE_TOOLS = ['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Bash', 'WebFetch', 'WebSearch']
+#: the tools of bazis-mcp that only read (`readOnlyHint`): allowed without asking
+MCP_READ_TOOLS = [
+    'list_packages', 'package_guide', 'guide_search', 'project_info', 'run_doctor',
+    'front_check', 'front_status', 'front_catalog', 'project_status', 'check_machine',
+    'server_logs', 'read_file', 'list_files',
+]
+#: the other tools of bazis-mcp, for a client without a shell, files or a project of its own:
+#: never given to the agent, which has the shell and the files of its project (its commands
+#: and edits are asked or denied below); a tool in neither list is asked or denied as any
+#: other tool not allowed in advance
+MCP_WORK_TOOLS = [
+    'create_project', 'use_project', 'install_tools', 'add_packages', 'run_command',
+    'start_server', 'stop_server', 'write_file',
+]
+#: the instructions of bazis-mcp tell a client to run commands and change files only with
+#: MCP_WORK_TOOLS: not for this agent
+MCP_RULE = f"""\
+- The MCP server `bazis` gives you only its tools that read: the instructions of the server
+  about {', '.join(f'`{name}`' for name in MCP_WORK_TOOLS)} do not apply here. You have a
+  shell: run the commands of these rules and change the files with your own tools, as far
+  as the task allows.
+"""
 #: the facts of the last run, in the local directory of the project (`scaffold.local_dir`),
 #: for the user, the measurements of the runs and the session that `bazis change` continues
 RUN_FILE = 'run.json'
@@ -104,18 +126,22 @@ def options(task: Task, asker: 'Asker | None' = None) -> ClaudeAgentOptions:
     (`strict_mcp_config`) and no settings of the project or the user are loaded, so the
     permissions below are the only ones.
 
-    A read-only task can only read the project and call the MCP tools. A task that writes
-    gets the edits of files in the project accepted (`acceptEdits`); everything else is
-    asked: shell commands through a PreToolUse hook (the CLI would otherwise allow commands
-    such as `rm` or `sed` in `acceptEdits` mode), the other tools through `can_use_tool`.
-    In both, `.env` cannot be read and git cannot change the repository.
+    Only the MCP tools that read (MCP_READ_TOOLS) are allowed in advance, MCP_WORK_TOOLS
+    never. A read-only task can only read the project and call those MCP tools. A task that
+    writes gets the edits of files in the project accepted (`acceptEdits`); everything else
+    is asked: shell commands through a PreToolUse hook (the CLI would otherwise allow
+    commands such as `rm` or `sed` in `acceptEdits` mode), the other tools through
+    `can_use_tool`. In both, `.env` cannot be read and git cannot change the repository.
 
     A task with a `session_id` resumes that session with these options: the rules of this
     run replace those the session recorded (`snapshot` off), and the budget counts only
     this run.
     """
-    rules = '\n'.join([RULES, *task.extra_rules])
-    secrets = [_path_rule(tool, task.project_dir / '.env') for tool in ('Read', 'Edit')]
+    rules = '\n'.join([RULES, MCP_RULE, *task.extra_rules])
+    denied = [
+        *(_path_rule(tool, task.project_dir / '.env') for tool in ('Read', 'Edit')),
+        *(f'mcp__bazis__{name}' for name in MCP_WORK_TOOLS),
+    ]
     common = dict(
         cwd=str(task.project_dir),
         model=task.model,
@@ -128,17 +154,17 @@ def options(task: Task, asker: 'Asker | None' = None) -> ClaudeAgentOptions:
         system_prompt={
             'type': 'preset', 'preset': 'claude_code', 'append': rules, 'snapshot': False,
         },
-        allowed_tools=['mcp__bazis'],
+        allowed_tools=[f'mcp__bazis__{name}' for name in MCP_READ_TOOLS],
     )
     if not task.writes:
         return ClaudeAgentOptions(
-            disallowed_tools=[*WRITE_TOOLS, *secrets],
+            disallowed_tools=[*WRITE_TOOLS, *denied],
             permission_mode='dontAsk',
             **common,
         )
     asker = asker or Asker(task.yes)
     return ClaudeAgentOptions(
-        disallowed_tools=[*GIT_DENY, *secrets],
+        disallowed_tools=[*GIT_DENY, *denied],
         permission_mode='acceptEdits',
         can_use_tool=asker.can_use_tool,
         hooks={'PreToolUse': [HookMatcher(matcher='Bash', hooks=[asker.bash_hook])]},
