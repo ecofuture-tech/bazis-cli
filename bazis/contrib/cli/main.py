@@ -31,124 +31,25 @@ from pathlib import Path
 
 from claude_agent_sdk import ClaudeSDKError, CLIConnectionError, ResultMessage
 
-from . import __version__, agent, scaffold
+from bazis.contrib.mcp import prompts, scaffold
+from bazis.contrib.mcp.rules import FRONTEND_RULES
 
-
-#: the order of the work on a product with a frontend made by bazis-front: the steps of the
-#: guide of bazis-front, with what bazis-cli adds to them (the packages, `.venv`, the
-#: description, the ports, one look at the screens, the final checks of the rules)
-FRONTEND_STEPS = """\
-Follow the steps of "Building the frontend of a product" in the introduction of the guide
-of bazis-front (`package_guide("bazis-front")`), with the section of each step read when
-you reach it, and with what this product adds to them:
-
-- Before step 1, read the introduction of the guide of the core (`package_guide("bazis")`)
-  and choose the Bazis packages the product needs with `list_packages` (the frontend logs in
-  with bazis-users, roles and access need bazis-permit, statuses and transits
-  bazis-statusy, files bazis-uploadable). The commands of `manage.py` run with
-  `.venv/bin/python manage.py`.
-- Step 2: the specs describe {source}, with scenarios for the main tasks of every role,
-  including what a role may not do, and the `languages` and `language` of the backend; run
-  `front_check` and fix the errors of the shape and of the references before the backend.
-- Step 3: the backend also has the tests and the translations that the rules require,
-  `makemigrations` and `run_doctor` without errors.
-- Step 5 is `front_check`; step 6 chooses the components with `front_catalog`, and the texts
-  of the screens go through `t()`.
-- Step 7: the brand, the colors and the fonts of the design fit {source}.
-- Step 8: install the browser once (`npx playwright install chromium` in `frontend/`), and
-  fix the screens, the specs or the backend until the tests pass. Then look at the screens
-  once: with the backend and `npm run dev` running, take a screenshot of each screen as a
-  role that uses it (into `.scratch/`) and fix what is visibly broken. One pass, no second
-  round of screenshots.
-- Step 9 is a part of the final checks of the rules: run them once, at the end. Say how to
-  run the backend (`.venv/bin/uvicorn {name}.main:app --port <backend>`) and the frontend
-  (`npm run dev -- --port <frontend>` in `frontend/`) with the ports of the project.
-"""
-
-
-def language_step(language: str | None) -> str:
-    """
-    What the prompt of `bazis new` says about the language of the product: the `language`
-    chosen with `--language`, else the agent finds it from the description.
-    """
-    if language:
-        code, own_name = scaffold.product_language(language)
-        languages = ' and English' if code != 'en' else ''
-        return f"""\
-The product is in {own_name} (`{code}`){languages}: `BS_LANGUAGES` and `BS_LANGUAGE_CODE` of
-`project.env` are set. Follow the rules of the languages."""
-    return """\
-The language of the product is the language of the description, and English is always one
-of its languages (the language of the msgids). `project.env` has English only: if the
-description is not in English, first set there
-`BS_LANGUAGES='[["<code>", "<its own name>"], ["en", "English"]]'` and
-`BS_LANGUAGE_CODE=<code>` with the code of Django of that language (`ru`, `de`, `pt-br`).
-Follow the rules of the languages."""
-
-
-def ports_text(ports: dict[str, int]) -> str:
-    """
-    What a prompt says about the ports of the project (`scaffold.project_ports`).
-    """
-    return (
-        f'The ports of this project on this machine (`.bazis/ports.json`): the backend '
-        f'{ports["backend"]}, the dev server of the frontend {ports["frontend"]}, the dev '
-        f'server of the end-to-end tests {ports["e2e"]}.'
-    )
-
-
-def new_prompt(
-    description: str,
-    name: str,
-    frontend: bool = False,
-    language: str | None = None,
-    database: str | None = None,
-    ports: dict[str, int] | None = None,
-) -> str:
-    """
-    The task of the agent of `bazis new` (also used by the evals): the backend, and with a
-    `frontend` the whole product with its frontend made by bazis-front, in the `language`
-    of `--language`, else in the language of the description; `database` is what
-    `scaffold.create_database` did, `ports` those of `scaffold.project_ports`.
-    """
-    database = f'\n{database}\n' if database else ''
-    ports = f'\n{ports_text(ports)}\n' if ports else ''
-    skeleton = f"""\
-Build this Bazis project: {description}
-
-The skeleton is ready: the project package `{name}` (settings, root router, ASGI app in
-`{name}/main.py`), `project.env`, `.env`, `requirements.txt`, `tests/` (its `conftest.py`
-keeps the cache keys of the tests apart), and `.venv` with Bazis installed.
-{database}{ports}
-{language_step(language)}
-"""
-    if not frontend:
-        return skeleton + f"""
-Read the introduction of the guide of the core (`package_guide("bazis")`), choose the
-Bazis packages the project needs with `list_packages`, read the introductions of their
-guides and the sections you need, then create the apps with their models, routes,
-translations and tests, and register the routers in `{name}/router.py`. Finish with one
-run of the final checks.
-"""
-    return skeleton + f"""
-bazis-front is in `requirements.txt` and `BS_INSTALLED_APPS`.
-
-Build the whole product, the backend and its frontend, in this order; register the
-routers of the apps in `{name}/router.py`.
-
-{FRONTEND_STEPS.format(source='the description', name=name)}"""
+from . import __version__, agent
 
 
 def new_task(args) -> agent.Task:
     directory = args.directory.resolve()
     name = args.name or scaffold.package_name(directory)
     frontend = not args.no_frontend
-    language = scaffold.product_language(args.language)[0] if args.language else None
+    # the Django of the CLI (bazis), before anything is written
+    language = scaffold.product_language(args.language) if args.language else None
     if frontend and (problem := scaffold.node_problem()):
         raise scaffold.ScaffoldError(
             f'{problem}. Install it, or pass --no-frontend to build only the backend.'
         )
-    scaffold.write_files(directory, name, frontend=frontend, language=language or 'en')
+    scaffold.write_files(directory, name, frontend=frontend)
+    if language:
+        scaffold.set_language(directory, language)
     print(f'Created the project {name} in {directory}')
     python = sys.executable  # the settings of the project need only Bazis
     if not args.no_venv:
@@ -163,65 +64,23 @@ def new_task(args) -> agent.Task:
     database = scaffold.create_database(directory, name, python)
     print(database)
     ports = scaffold.project_ports(directory)
-    prompt = new_prompt(args.description, name, frontend, language, database, ports)
+    prompt = prompts.new_prompt(args.description, name, frontend, language, database, ports)
     return _task(args, prompt, directory, frontend=frontend)
-
-
-def has_frontend(project_dir: Path) -> bool:
-    """
-    Whether the project has a frontend made by `bazis_front init` (its lock).
-    """
-    return (project_dir / 'frontend' / 'bazis-front.lock.json').is_file()
-
-
-def frontend_change(change: str) -> str:
-    """
-    What a prompt says about a change of a product with a frontend made by bazis-front:
-    `change` names what changes it (`the package`, `the change`).
-    """
-    return f"""
-The product has a frontend (bazis-front). Describe in `spec/` what {change} changes in the
-product (fields, workflows, access, scenarios, screens). After the backend: migrate,
-export the contract (`.venv/bin/python manage.py bazis_front contract`) and fix the spec
-or the backend until `front_check` reports no errors. With `front_catalog` find the
-components of what {change} adds and copy those the screens need (`bazis_front add`), use
-them in the screens, generate the end-to-end tests again (`bazis_front e2e`), extend
-`e2e_data`, and finish with the final checks of the rules.
-"""
 
 
 def add_task(args) -> agent.Task:
     project_dir = args.project_dir.resolve()
-    goal = f' The project needs it for: {args.goal}' if args.goal else ''
-    prompt = f"""\
-Add the Bazis package {args.package} to this project and use it.{goal}
-
-Read its guide with `package_guide("{args.package}")` and the guides of the Bazis packages
-it requires that are not installed (`list_packages`), install them, follow the setup of the
-guides, change the models and routes they concern, create the migrations, add tests, and
-make `run_doctor` pass without the warnings of the new packages.
-"""
-    if args.package == 'bazis-front':
-        prompt += (
-            f'\nInstall bazis-front from the requirement `{scaffold.frontend_requirement()}`: '
-            'add this line to `requirements.txt` as it is.\n'
-        )
-    frontend = has_frontend(project_dir)
-    if frontend:
-        prompt += frontend_change('the package')
-    elif args.package == 'bazis-front':
-        frontend = True
-        source = 'the backend' + (' and what the project needs it for' if args.goal else '')
-        steps = FRONTEND_STEPS.format(source=source, name='<project package>')
-        prompt += f'\nThen build the frontend of the product in this order:\n\n{steps}'
-    if frontend:
-        prompt += f'\n{ports_text(scaffold.project_ports(project_dir))}\n'
+    built = prompts.has_frontend(project_dir)
+    # bazis-front added to a backend builds its frontend
+    frontend = built or args.package == 'bazis-front'
+    ports = scaffold.project_ports(project_dir) if frontend else None
+    prompt = prompts.add_prompt(args.package, args.goal, built, ports)
     return _task(args, prompt, project_dir, frontend=frontend)
 
 
 def audit_task(args) -> agent.Task:
     project_dir = args.project_dir.resolve()
-    frontend = has_frontend(project_dir)
+    frontend = prompts.has_frontend(project_dir)
     if args.fix:
         action = 'Then fix the problems you are sure about and run the final checks of the rules once.'
     else:
@@ -252,7 +111,7 @@ Audit this Bazis project.
 {action}
 """
     if frontend and args.fix:
-        prompt += f'\n{ports_text(scaffold.project_ports(project_dir))}\n'
+        prompt += f'\n{prompts.ports_text(scaffold.project_ports(project_dir))}\n'
     return _task(args, prompt, project_dir, writes=args.fix, frontend=frontend)
 
 
@@ -262,23 +121,9 @@ def change_task(args, request: str, session: str | None) -> agent.Task:
     has the project and the steps already); in a new session, with the preparation.
     """
     project_dir = args.project_dir.resolve()
-    frontend = has_frontend(project_dir)
-    if session:
-        prompt = f'{request}\n\nAfter the change, run the final checks of the rules once.\n'
-    else:
-        prompt = f"""\
-Change this Bazis project: {request}
-
-The project exists: read `project_info` and the guides of the packages the change concerns
-(`package_guide`; `list_packages` for a package it needs that is not installed). Change the
-models, routes, translations and tests it concerns, with new migrations, and test the
-rules it adds.
-"""
-        if frontend:
-            prompt += frontend_change('the change')
-            prompt += f'\n{ports_text(scaffold.project_ports(project_dir))}\n'
-        else:
-            prompt += '\nFinish with the final checks of the rules.\n'
+    frontend = prompts.has_frontend(project_dir)
+    ports = scaffold.project_ports(project_dir) if frontend and not session else None
+    prompt = prompts.change_prompt(request, resumed=bool(session), ports=ports)
     return _task(args, prompt, project_dir, frontend=frontend, session_id=session)
 
 
@@ -332,7 +177,7 @@ def _task(
         effort=args.effort,
         max_budget_usd=args.budget,
         yes=args.yes,
-        extra_rules=[agent.FRONTEND_RULES] if frontend else [],
+        extra_rules=[FRONTEND_RULES] if frontend else [],
         session_id=session_id,
     )
 

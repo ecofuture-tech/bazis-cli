@@ -2,20 +2,24 @@
 
 The `bazis` command (`bazis new`, `bazis add`, `bazis audit`, `bazis change`): Claude Code through the
 Claude Agent SDK, run in a Bazis project with the MCP server bazis-mcp and the rules of
-Bazis (`agent.RULES`).
+Bazis (`bazis.contrib.mcp.rules.RULES`).
 
-- `bazis/contrib/cli/main.py` — the commands and their prompts;
+- `bazis/contrib/cli/main.py` — the commands, with the tasks of `bazis.contrib.mcp.prompts`
+  (and the prompt of `bazis audit`);
 - `bazis/contrib/cli/agent.py` — the options of the agent (tools, permissions, MCP server),
-  the permission prompt in the terminal and the output;
-- `bazis/contrib/cli/scaffold.py` — the skeleton of a new project and its `.venv`, with
-  bazis-front in its requirements and apps unless `--no-frontend`, its languages
-  (`--language`, else English until the agent sets the language of the description), and
-  the check of Node.js.
+  the permission prompt in the terminal and the output.
+
+The skeleton of a new project and its `.venv` (bazis-front in its requirements and apps
+unless `--no-frontend`, its languages: `--language`, else English until the agent sets the
+language of the description, the check of Node.js), the rules and the tasks of the agent
+are in bazis-mcp (`bazis.contrib.mcp.scaffold`, `rules`, `prompts`), with their tests.
+`--language` is checked by the Django of the Python of the CLI (bazis is its dependency),
+before anything is written.
 
 The frontend of a product is made by bazis-front (`manage.py bazis_front ...`) and read by
 the tools of bazis-mcp (`front_check`, `front_status`, `front_catalog`): bazis-cli only
-orders the work in its prompts (`main.FRONTEND_STEPS`) and rules (`agent.FRONTEND_RULES`),
-it has no frontend code of its own.
+orders the work with the prompts (`prompts.FRONTEND_STEPS`) and rules
+(`rules.FRONTEND_RULES`) of bazis-mcp, it has no frontend code of its own.
 
 Commits, tags and pull requests are authored by the maintainer, Ilya Kharyn
 <ilya.tt07@gmail.com>, never by an AI assistant (see the CLAUDE.md of the core).
@@ -23,16 +27,12 @@ Commits, tags and pull requests are authored by the maintainer, Ilya Kharyn
 ## Running the tests
 
 The tests replace the Claude Agent SDK with a fake: they spend no credits and need no
-account. The scaffold test runs `bazis_doctor` in a generated project (GDAL is needed for
-the PostGIS backend; neither PostgreSQL nor Redis):
+account; neither PostgreSQL nor Redis is needed:
 
 ```bash
 python -m pytest tests -p no:cacheprovider
 ```
 
-The scaffold test of a product with a frontend runs only where bazis-front is installed.
-The test that creates the database of a project runs with `BAZIS_CLI_TEST_POSTGRES=host:port`
-(a PostgreSQL server with PostGIS, user and password `postgres`); it drops what it creates.
 `evals/` builds projects with the real agent (`python -m evals.run --budget N`); its task
 with a frontend also needs Node.js and, before the release of bazis-front,
 `BAZIS_FRONT_REQUIREMENT`.

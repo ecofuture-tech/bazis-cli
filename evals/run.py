@@ -31,7 +31,9 @@ import tomllib
 from datetime import UTC, datetime
 from pathlib import Path
 
-from bazis.contrib.cli import agent, main, scaffold
+from bazis.contrib.cli import agent
+from bazis.contrib.mcp import prompts, scaffold
+from bazis.contrib.mcp.rules import FRONTEND_RULES
 
 from . import grade
 
@@ -62,7 +64,7 @@ async def build(task: dict, project: Path, args) -> dict:
     with (project.parent / f'{task["id"]}.log').open('w', encoding='utf-8') as log:
         result = await agent.run(
             agent.Task(
-                prompt=main.new_prompt(
+                prompt=prompts.new_prompt(
                     task['description'], name, frontend, database=database,
                     ports=scaffold.project_ports(project),
                 ),
@@ -71,7 +73,7 @@ async def build(task: dict, project: Path, args) -> dict:
                 effort=args.effort,
                 max_budget_usd=args.budget,
                 yes=True,  # no terminal: the agent runs commands in its own project only
-                extra_rules=[agent.FRONTEND_RULES] if frontend else [],
+                extra_rules=[FRONTEND_RULES] if frontend else [],
             ),
             out=log,
         )

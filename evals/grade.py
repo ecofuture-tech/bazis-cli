@@ -38,8 +38,8 @@ import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from bazis.contrib.cli import scaffold
 from bazis.contrib.mcp import project as mcp_project
+from bazis.contrib.mcp import scaffold
 
 
 #: the prefixes of the system check ids of the Bazis packages (the Django `security.*`

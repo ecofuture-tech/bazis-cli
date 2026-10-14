@@ -67,7 +67,8 @@ Git.
 bazis-cli only orchestrates: the frontend logic (template, contract, specs, components,
 design, end-to-end tests) is in bazis-front and its `manage.py bazis_front` commands, the
 read-only tools in bazis-mcp (`front_check`, `front_status`, `front_catalog`); the CLI adds
-the prompts and the rules (`agent.FRONTEND_RULES`). `BAZIS_FRONT_REQUIREMENT` (a path to a
+the order of the work, with the skeleton, the prompts and the rules of bazis-mcp
+(`bazis.contrib.mcp.scaffold`, `prompts`, `rules`). `BAZIS_FRONT_REQUIREMENT` (a path to a
 wheel or a checkout, or a URL) replaces the requirement of bazis-front in a new product, to
 try a version that is not on PyPI.
 

@@ -17,8 +17,7 @@ import os
 import subprocess
 import time
 
-from bazis.contrib.cli import scaffold
-from bazis.contrib.mcp import catalog
+from bazis.contrib.mcp import catalog, scaffold
 
 from evals import grade, run
 
