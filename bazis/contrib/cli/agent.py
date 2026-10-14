@@ -65,7 +65,7 @@ MCP_READ_TOOLS = [
 #: other tool not allowed in advance
 MCP_WORK_TOOLS = [
     'create_project', 'use_project', 'install_tools', 'add_packages', 'run_command',
-    'start_server', 'stop_server', 'write_file',
+    'start_server', 'stop_server', 'write_file', 'delete_file',
 ]
 #: the instructions of bazis-mcp tell a client to run commands and change files only with
 #: MCP_WORK_TOOLS: not for this agent
