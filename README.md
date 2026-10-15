@@ -47,7 +47,8 @@ bazis change          # the changes typed one after another; an empty line ends
   chooses free ports for the servers of the project (`.bazis/ports.json`). It creates
   `.venv` with Bazis and bazis-mcp (with uv if it is installed; `--no-venv` skips it),
   raises the minimums of the requirements to the installed releases, and the database of `.env` with PostGIS when PostgreSQL is reachable (else it says
-  so and goes on). Then the agent chooses the Bazis packages, creates the apps, models,
+  so and goes on; a database of that name with the data of another project is left as it
+  is, and the first free `<name>_N` is created and set in `.env` instead). Then the agent chooses the Bazis packages, creates the apps, models,
   routes, migrations and tests, and runs the checks.
 - By default `bazis new` builds the whole product with its frontend, made by
   [bazis-front](https://github.com/ecofuture-tech/bazis-front): the specs of the product
