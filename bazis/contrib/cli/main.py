@@ -256,7 +256,7 @@ def run(task: agent.Task) -> tuple[int, ResultMessage | None]:
     interrupted) and the result of the agent.
     """
     try:
-        result = asyncio.run(agent.run(task))
+        result, cost = asyncio.run(agent.run(task))
     except ClaudeSDKError as err:
         print(f'bazis: {err}', file=sys.stderr)
         if isinstance(err, CLIConnectionError) or 'auth' in str(err).lower():
@@ -271,7 +271,6 @@ def run(task: agent.Task) -> tuple[int, ResultMessage | None]:
     if result is None:
         print('bazis: the agent ended without a result', file=sys.stderr)
         return 1, None
-    cost = agent.last_run(task.project_dir)['cost_usd']
     cost = f', ${cost:.2f}' if cost is not None else ''
     print(f'\n[{result.num_turns} turns{cost}]', file=sys.stderr)
     if result.is_error:

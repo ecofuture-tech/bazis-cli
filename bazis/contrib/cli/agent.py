@@ -272,12 +272,12 @@ def last_session(project_dir: Path) -> str | None:
 
 def write_run(
     task: Task, result: ResultMessage, tools: Counter, started: datetime, before: dict
-) -> None:
+) -> float | None:
     """
     Writes the facts of a run as JSON to RUN_FILE of the project: the session, the turns,
-    the cost, the duration, the usage of the tokens and the calls of each tool. A resumed
-    session reports the cost of the whole session: the cost of the run is what it adds to
-    the cost of the session in the facts of the run `before`.
+    the cost, the duration, the usage of the tokens and the calls of each tool; returns the
+    cost of the run. A resumed session reports the cost of the whole session: the cost of
+    the run is what it adds to the cost of the session in the facts of the run `before`.
     """
     cost = result.total_cost_usd
     if task.session_id and before.get('session_id') == task.session_id:
@@ -303,12 +303,15 @@ def write_run(
     }
     path = scaffold.local_dir(task.project_dir) / RUN_FILE
     path.write_text(json.dumps(facts, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
+    return cost
 
 
-async def run(task: Task, out: TextIO | None = None) -> ResultMessage | None:
+async def run(
+    task: Task, out: TextIO | None = None
+) -> tuple[ResultMessage | None, float | None]:
     """
     Runs the task and prints the progress; returns the final result of the agent, whose
-    facts are written to RUN_FILE.
+    facts are written to RUN_FILE, and the cost of the run.
     """
     result = None
     tools = Counter()
@@ -324,9 +327,9 @@ async def run(task: Task, out: TextIO | None = None) -> ResultMessage | None:
         # the result says why
         if result is None:
             raise
-    if result is not None:
-        write_run(task, result, tools, started, before)
-    return result
+    if result is None:
+        return None, None
+    return result, write_run(task, result, tools, started, before)
 
 
 def error_text(result: ResultMessage) -> str:

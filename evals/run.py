@@ -62,7 +62,7 @@ async def build(task: dict, project: Path, args) -> dict:
     database = scaffold.create_database(project, name, scaffold.create_venv(project))
     started = time.monotonic()
     with (project.parent / f'{task["id"]}.log').open('w', encoding='utf-8') as log:
-        result = await agent.run(
+        result, cost = await agent.run(
             agent.Task(
                 prompt=prompts.new_prompt(
                     task['description'], name, frontend, database=database,
@@ -79,7 +79,7 @@ async def build(task: dict, project: Path, args) -> dict:
         )
     return {
         'seconds': round(time.monotonic() - started),
-        'cost_usd': result.total_cost_usd if result else None,
+        'cost_usd': cost,
         'turns': result.num_turns if result else None,
         'agent_error': agent.error_text(result) if result and result.is_error else None,
     }
