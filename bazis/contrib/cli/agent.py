@@ -44,6 +44,7 @@ from claude_agent_sdk.types import CanUseToolShadowedWarning
 
 from bazis.contrib.mcp import scaffold
 from bazis.contrib.mcp.rules import RULES
+from bazis.contrib.mcp.server import server
 
 
 DEFAULT_MODEL = 'claude-opus-5-5'
@@ -53,27 +54,13 @@ DEFAULT_EFFORT = 'high'
 GIT_DENY = ['Bash(git commit:*)', 'Bash(git push:*)', 'Bash(git reset:*)', 'Bash(git rebase:*)']
 #: tools a review cannot use
 WRITE_TOOLS = ['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Bash', 'WebFetch', 'WebSearch']
-#: the tools of bazis-mcp that only read (`readOnlyHint`): allowed without asking
-MCP_READ_TOOLS = [
-    'list_packages', 'package_guide', 'guide_search', 'project_info', 'run_doctor',
-    'front_check', 'front_status', 'front_catalog', 'project_status', 'check_machine',
-    'server_logs', 'read_file', 'list_files',
-]
-#: the other tools of bazis-mcp, for a client without a shell, files or a project of its own:
-#: never given to the agent, which has the shell and the files of its project (its commands
-#: and edits are asked or denied below); a tool in neither list is asked or denied as any
-#: other tool not allowed in advance
-MCP_WORK_TOOLS = [
-    'create_project', 'use_project', 'install_tools', 'add_packages', 'run_command',
-    'start_server', 'stop_server', 'write_file', 'delete_file',
-]
-#: the instructions of bazis-mcp tell a client to run commands and change files only with
-#: MCP_WORK_TOOLS: not for this agent
-MCP_RULE = f"""\
+#: the instructions of bazis-mcp tell a client to run commands and change files with the
+#: tools of the server: not for this agent
+MCP_RULE = """\
 - The MCP server `bazis` gives you only its tools that read: the instructions of the server
-  about {', '.join(f'`{name}`' for name in MCP_WORK_TOOLS)} do not apply here. You have a
-  shell: run the commands of these rules and change the files with your own tools, as far
-  as the task allows.
+  about its tools that run commands, start servers, install or change files do not apply
+  here. You have a shell: run the commands of these rules and change the files with your
+  own tools, as far as the task allows.
 """
 #: the facts of the last run, in the local directory of the project (`scaffold.local_dir`),
 #: for the user, the measurements of the runs and the session that `bazis change` continues
@@ -120,27 +107,30 @@ def _path_rule(tool: str, path: Path) -> str:
     return f'{tool}(//{path.resolve().as_posix().lstrip("/")})'
 
 
-def options(task: Task, asker: 'Asker | None' = None) -> ClaudeAgentOptions:
+async def options(task: Task, asker: 'Asker | None' = None) -> ClaudeAgentOptions:
     """
     The options of the agent for a task. Only the MCP server bazis-mcp of the CLI is used
     (`strict_mcp_config`) and no settings of the project or the user are loaded, so the
     permissions below are the only ones.
 
-    Only the MCP tools that read (MCP_READ_TOOLS) are allowed in advance, MCP_WORK_TOOLS
-    never. A read-only task can only read the project and call those MCP tools. A task that
-    writes gets the edits of files in the project accepted (`acceptEdits`); everything else
-    is asked: shell commands through a PreToolUse hook (the CLI would otherwise allow
-    commands such as `rm` or `sed` in `acceptEdits` mode), the other tools through
-    `can_use_tool`. In both, `.env` cannot be read and git cannot change the repository.
+    The tools of bazis-mcp that read (`readOnlyHint`) are allowed in advance; the others,
+    for a client without a shell (a new one too), are never given to the agent, which has
+    the shell and the files of its project. A read-only task can only read the project and
+    call those MCP tools. A task that writes gets the edits of files in the project accepted
+    (`acceptEdits`); everything else is asked: shell commands through a PreToolUse hook
+    (the CLI would otherwise allow commands such as `rm` or `sed` in `acceptEdits` mode),
+    the other tools through `can_use_tool`. In both, `.env` cannot be read and git cannot change the repository.
 
     A task with a `session_id` resumes that session with these options: the rules of this
     run replace those the session recorded (`snapshot` off), and the budget counts only
     this run.
     """
     rules = '\n'.join([RULES, MCP_RULE, *task.extra_rules])
+    tools = {f'mcp__bazis__{tool.name}': tool.annotations for tool in await server.list_tools()}
+    reads = [name for name, hints in tools.items() if hints and hints.read_only_hint]
     denied = [
         *(_path_rule(tool, task.project_dir / '.env') for tool in ('Read', 'Edit')),
-        *(f'mcp__bazis__{name}' for name in MCP_WORK_TOOLS),
+        *(name for name in tools if name not in reads),
     ]
     common = dict(
         cwd=str(task.project_dir),
@@ -154,7 +144,7 @@ def options(task: Task, asker: 'Asker | None' = None) -> ClaudeAgentOptions:
         system_prompt={
             'type': 'preset', 'preset': 'claude_code', 'append': rules, 'snapshot': False,
         },
-        allowed_tools=[f'mcp__bazis__{name}' for name in MCP_READ_TOOLS],
+        allowed_tools=reads,
     )
     if not task.writes:
         return ClaudeAgentOptions(
@@ -327,7 +317,7 @@ async def run(task: Task, out: TextIO | None = None) -> ResultMessage | None:
     # the read-only MCP tools of bazis-mcp are allowed in advance on purpose
     warnings.filterwarnings('ignore', category=CanUseToolShadowedWarning)
     try:
-        async for message in query(prompt=task.prompt, options=options(task)):
+        async for message in query(prompt=task.prompt, options=await options(task)):
             result = render(message, out, tools) or result
     except ResultError:
         # the CLI exits with an error after a failed result (e.g. the budget is spent):
