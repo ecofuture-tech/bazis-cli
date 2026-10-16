@@ -16,6 +16,7 @@ import io
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from claude_agent_sdk import (
@@ -142,6 +143,29 @@ async def test_options_of_a_read_only_task(tmp_path):
     assert {'Write', 'Edit', 'Bash', 'WebFetch'} <= set(options.disallowed_tools)
     assert set(MCP_WORK) <= set(options.disallowed_tools)
     assert f'Read(/{tmp_path.resolve()}/.env)' in options.disallowed_tools
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize('writes', [True, False])
+async def test_only_the_mcp_tools_with_read_only_hint_are_allowed(tmp_path, monkeypatch, writes):
+    """
+    A tool of bazis-mcp is allowed only with `readOnlyHint` true: without annotations, with
+    the hint false or missing, it is disallowed; every tool is in one of the lists.
+    """
+    hints = {'reads': True, 'writes': False, 'unknown': None}
+    tools = [SimpleNamespace(name=name, annotations=SimpleNamespace(read_only_hint=hint))
+             for name, hint in hints.items()]
+
+    async def list_tools():
+        return [*tools, SimpleNamespace(name='bare', annotations=None)]
+
+    monkeypatch.setattr(agent.server, 'list_tools', list_tools)
+    options = await agent.options(agent.Task('build', tmp_path, writes=writes))
+
+    assert options.allowed_tools == ['mcp__bazis__reads']
+    assert {name for name in options.disallowed_tools if name.startswith('mcp__bazis__')} == {
+        'mcp__bazis__writes', 'mcp__bazis__unknown', 'mcp__bazis__bare',
+    }
 
 
 class FakeTerminal(io.StringIO):
