@@ -101,7 +101,9 @@ MCP_WORK = [
 
 @pytest.mark.anyio
 async def test_options_of_a_task_that_writes(tmp_path):
-    options = await agent.options(agent.Task('build', tmp_path, model='claude-sonnet-5-5'))
+    options = await agent.options(
+        agent.Task('build', tmp_path, model='claude-sonnet-5-5', session_id='s')
+    )
 
     assert options.cwd == str(tmp_path)
     assert options.model == 'claude-sonnet-5-5'
@@ -123,6 +125,9 @@ async def test_options_of_a_task_that_writes(tmp_path):
     server = options.mcp_servers['bazis']
     assert server['args'][-2:] == ['--project-dir', str(tmp_path)]
     assert 'package_guide' in options.system_prompt['append']
+    # a resumed session gets the rules of this run, not those it recorded
+    assert options.resume == 's'
+    assert options.system_prompt['snapshot'] is False
 
 
 @pytest.mark.anyio
@@ -415,24 +420,24 @@ def test_new_in_a_directory_with_files(tmp_path, fake_agent, capsys):
     assert fake_agent == []
 
 
-def test_new_says_how_to_change_the_project(tmp_path, fake_agent, capsys):
+@pytest.mark.parametrize('args, directory, hint', [
+    (['new', 'my library', 'A library', '--no-venv', '--no-frontend'], 'my library',
+     "cd 'my library' && bazis change"),
+    (['add', 'bazis-permit', '--project-dir', 'my library'], 'my library',
+     "cd 'my library' && bazis change"),
+    (['add', 'bazis-permit'], '.', 'bazis change'),
+])
+def test_how_to_change_the_project(
+    tmp_path, fake_agent, capsys, monkeypatch, args, directory, hint
+):
     """
     After `bazis new` and `bazis add` the user is told how to go on changing the project,
     with the directory he gave.
     """
-    directory = tmp_path / 'my library'
-    assert main.main(['new', str(directory), 'A library', '--no-venv', '--no-frontend']) == 0
-    assert f"To change the project: cd '{directory}' && bazis change" in capsys.readouterr().err
-
-    assert main.main(['add', 'bazis-permit', '--project-dir', str(directory)]) == 0
-    assert f"cd '{directory}' && bazis change" in capsys.readouterr().err
-
-
-def test_add_in_the_project_says_how_to_change_it(tmp_path, fake_agent, capsys, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    assert main.main(['add', 'bazis-permit']) == 0
-    assert 'To change the project: bazis change\n' in capsys.readouterr().err
-    assert fake_agent[0][1].cwd == str(tmp_path.resolve())
+    assert main.main(args) == 0
+    assert f'To change the project: {hint}\n' in capsys.readouterr().err
+    assert fake_agent[0][1].cwd == str((tmp_path / directory).resolve())
 
 
 @pytest.fixture
@@ -462,8 +467,7 @@ def test_change(tmp_path, fake_agent, sessions, capsys):
     assert options.resume is None
     assert 'Change this Bazis project: Loans last two weeks' in prompt
     assert 'project_info' in prompt and 'Finish with the final checks of the rules' in prompt
-    assert options.permission_mode == 'acceptEdits'
-    assert 'Bash(git push:*)' in options.disallowed_tools
+    assert options.permission_mode == 'acceptEdits'  # the options of a task that writes
     assert FRONTEND_RULES not in options.system_prompt['append']
     facts = json.loads((tmp_path / scaffold.LOCAL_DIR / agent.RUN_FILE).read_text())
     assert facts['session_id'] == 's'
@@ -504,17 +508,6 @@ def test_change_of_a_product_with_a_frontend(tmp_path, fake_agent, sessions):
     prompt, options = fake_agent[-1]
     assert options.resume == 's' and 'bazis_front' not in prompt
     assert FRONTEND_RULES in options.system_prompt['append']
-
-
-@pytest.mark.anyio
-async def test_options_of_a_resumed_session(tmp_path):
-    """
-    A resumed session gets the rules of this run, not those it recorded.
-    """
-    options = await agent.options(agent.Task('build', tmp_path, session_id='s'))
-    assert options.resume == 's'
-    assert options.system_prompt['snapshot'] is False
-    assert options.setting_sources == [] and options.strict_mcp_config is True
 
 
 def session_agent(monkeypatch, results: list):
