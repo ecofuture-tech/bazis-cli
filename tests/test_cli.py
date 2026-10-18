@@ -15,6 +15,8 @@
 import io
 import json
 import sys
+import tomllib
+from importlib import metadata
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -615,3 +617,23 @@ def test_change_without_a_terminal(tmp_path, fake_agent, monkeypatch, capsys):
     assert 'bazis change "..."' in capsys.readouterr().err
     assert fake_agent == []
 
+
+def test_requirements_are_the_latest_releases():
+    """
+    The CLI requires at least the releases that bazis-mcp describes: its catalog of the
+    released packages gives bazis, and the installed bazis-mcp is the release of that catalog.
+    """
+    from bazis.contrib.mcp import catalog
+
+    def version(text):
+        return tuple(int(part) for part in text.split('.')[:3])
+
+    installed = metadata.version('bazis-mcp')
+    if 'dev' in installed:
+        pytest.skip(f'bazis-mcp {installed} is not a release')
+    pyproject = tomllib.loads((Path(__file__).parent.parent / 'pyproject.toml').read_text())
+    released = {**{name: entry['version'] for name, entry in catalog.catalog().items()}, 'bazis-mcp': installed}
+    pins = dict(it.split('>=') for it in pyproject['project']['dependencies'] if it.startswith('bazis'))
+    assert pins.keys() == {'bazis', 'bazis-mcp'}
+    for name, minimum in pins.items():
+        assert version(minimum) >= version(released[name]), f'{name}>={minimum}, released {released[name]}'

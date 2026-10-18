@@ -12,10 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import contextlib
+import io
 import json
 import os
 import subprocess
+import sys
 import time
+import types
 
 import pytest
 
@@ -98,9 +102,43 @@ def test_local_apps(tmp_path):
 def test_project_env_isolates_the_database(monkeypatch):
     monkeypatch.setenv('BS_DEBUG', 'false')
     monkeypatch.setenv('DJANGO_SETTINGS_MODULE', 'other.settings')
+    monkeypatch.setenv('BS_DATABASES__DEFAULT__NAME', 'other')
     env = grade.project_env('eval_x')
     assert env['BS_DATABASES__DEFAULT__NAME'] == 'eval_x'
     assert 'BS_DEBUG' not in env and 'DJANGO_SETTINGS_MODULE' not in env
+
+
+def test_project_env_keeps_the_settings_of_the_machine(monkeypatch):
+    machine = {
+        'BS_DATABASES__DEFAULT__PORT': '55910', 'BS_GDAL_LIBRARY_PATH': '/opt/lib/libgdal.dylib',
+        'BS_GEOS_LIBRARY_PATH': '/opt/lib/libgeos_c.dylib', 'PGHOST': 'db', 'DYLD_LIBRARY_PATH': '/opt/lib',
+    }
+    for key, value in machine.items():
+        monkeypatch.setenv(key, value)
+    assert machine.items() <= grade.project_env('eval_x').items()
+
+
+def test_database_server_of_the_project(monkeypatch):
+    settings = types.SimpleNamespace(DATABASES={'default': {
+        'HOST': 'db', 'PORT': '55910', 'USER': 'owner', 'PASSWORD': 'secret', 'NAME': 'x',
+    }})
+    monkeypatch.setitem(sys.modules, 'django', types.ModuleType('django'))
+    monkeypatch.setitem(sys.modules, 'django.conf', types.SimpleNamespace(settings=settings))
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        exec(grade.DATABASE_SERVER, {})
+    server = json.loads(output.getvalue())
+    assert server == {'host': 'db', 'port': '55910', 'user': 'owner', 'password': 'secret'}
+    assert grade.postgres_command('createdb', server, 'eval_x') == [
+        'createdb', '-h', 'db', '-U', 'owner', '-p', '55910', 'eval_x',
+    ]
+
+
+def test_postgres_command_defaults():
+    server = {'host': None, 'port': None, 'user': None, 'password': None}
+    assert grade.postgres_command('dropdb', server, '--force', 'x') == [
+        'dropdb', '-h', 'localhost', '-U', 'postgres', '--force', 'x',
+    ]
 
 
 def test_summary(tmp_path):

@@ -51,6 +51,21 @@ BAZIS_CHECK_PREFIXES = (
     'async_request.', 'bg.', 'front.',
 )
 TIMEOUT = 900
+#: the settings of the machine that the agent was given and the project must keep when it is
+#: graded: the PostgreSQL and Redis servers and the GDAL and GEOS libraries. The other `BS_*`
+#: variables are those of the project (its `.env`), the name of the database is the grader's
+MACHINE_SETTINGS = (
+    'BS_DATABASES__DEFAULT__HOST', 'BS_DATABASES__DEFAULT__PORT', 'BS_DATABASES__DEFAULT__USER',
+    'BS_DATABASES__DEFAULT__PASSWORD', 'BS_CACHES__DEFAULT__LOCATION',
+    'BS_GDAL_LIBRARY_PATH', 'BS_GEOS_LIBRARY_PATH',
+)
+#: run by `manage.py shell` of the project: prints the server of its database as JSON
+DATABASE_SERVER = """\
+import json
+from django.conf import settings
+db = settings.DATABASES['default']
+print(json.dumps({key: db.get(key.upper()) or None for key in ('host', 'port', 'user', 'password')}))
+"""
 #: the TSX of `frontend/src/` that a product does not write: the generated screens and the
 #: template (its entry, its app and its login), besides the assets that bazis-front copied
 #: (the files of `assets` in its lock, among them the shadcn components of `components/ui/`)
@@ -132,11 +147,25 @@ def local_apps(project: Path) -> set[str]:
 
 def project_env(database: str) -> dict:
     """
-    The environment of the project: its own .env and project.env, a database of its own.
+    The environment of the project: its own .env and project.env and the settings of the
+    machine (`MACHINE_SETTINGS`), a database of its own.
     """
-    env = {k: v for k, v in os.environ.items() if not k.startswith(('BS_', 'DJANGO_'))}
+    env = {
+        k: v for k, v in os.environ.items()
+        if k in MACHINE_SETTINGS or not k.startswith(('BS_', 'DJANGO_'))
+    }
     env['BS_DATABASES__DEFAULT__NAME'] = database
     return env
+
+
+def postgres_command(program: str, server: dict, *args: str) -> list[str]:
+    """
+    A PostgreSQL client command (`createdb`, `dropdb`) for the server of the project.
+    """
+    command = [program, '-h', server['host'] or 'localhost', '-U', server['user'] or 'postgres']
+    if server['port']:
+        command += ['-p', str(server['port'])]
+    return [*command, *args]
 
 
 def package_warnings(messages: list[dict]) -> list[str]:
@@ -196,10 +225,12 @@ def grade(project: Path, task: dict) -> list[Check]:
 
     if task.get('frontend'):
         checks += frontend_checks(project, env, task.get('min_scenarios', 1))
-    if shutil.which('createdb'):
+    server = mcp_project.parse_json(run(project, ['manage.py', 'shell', '-c', DATABASE_SERVER], env).stdout)
+    if shutil.which('createdb') and server:
+        client_env = {**env, 'PGPASSWORD': server['password'] or ''}
         created = subprocess.run(
-            ['createdb', '-h', 'localhost', '-U', 'postgres', database],
-            env={**env, 'PGPASSWORD': 'postgres'}, capture_output=True, text=True,
+            postgres_command('createdb', server, database),
+            env=client_env, capture_output=True, text=True,
         )
         try:
             migrate = run(project, ['manage.py', 'migrate', '--noinput'], env)
@@ -211,8 +242,8 @@ def grade(project: Path, task: dict) -> list[Check]:
                 checks += frontend_database_checks(project, env, migrated)
         finally:
             subprocess.run(
-                ['dropdb', '-h', 'localhost', '-U', 'postgres', '--if-exists', '--force', database],
-                env={**env, 'PGPASSWORD': 'postgres'}, capture_output=True,
+                postgres_command('dropdb', server, '--if-exists', '--force', database),
+                env=client_env, capture_output=True,
             )
     elif task.get('frontend'):
         checks += frontend_database_checks(project, env, False, 'no PostgreSQL (createdb)')
