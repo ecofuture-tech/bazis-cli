@@ -196,7 +196,8 @@ def test_written_screens(tmp_path, monkeypatch):
     (source / 'components' / 'ui').mkdir(parents=True)
     (source / 'components' / 'ui' / 'button.tsx').write_text('x\n' * 100)
     (source.parent / 'bazis-front.lock.json').write_text(json.dumps({
-        'assets': {'button': {'files': {'src/components/ui/button.tsx': 'sha256:0'}}},
+        # an entry of an old dev-lock has no `files`
+        'assets': {'button': {'files': {'src/components/ui/button.tsx': 'sha256:0'}}, 'old': {}},
     }))
 
     check = grade.written_screens(tmp_path, {})

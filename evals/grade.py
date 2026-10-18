@@ -336,7 +336,7 @@ def written_screens(project: Path, env: dict) -> Check:
     source = project / 'frontend' / 'src'
     lock = json.loads((project / 'frontend' / 'bazis-front.lock.json').read_text(encoding='utf-8'))
     copied = {
-        file.removeprefix('src/') for asset in lock['assets'].values() for file in asset['files']
+        file.removeprefix('src/') for asset in lock['assets'].values() for file in asset.get('files', ())
     }
     written = {
         name: path for path in sorted(source.rglob('*.tsx'))
