@@ -125,7 +125,7 @@ def product(tmp_path, scenarios: int):
     scaffold.write_files(tmp_path, 'desk', frontend=True)
     generated = tmp_path / 'frontend' / 'e2e' / 'generated'
     generated.mkdir(parents=True)
-    (tmp_path / 'frontend' / 'bazis-front.lock.json').write_text('{}')
+    (tmp_path / 'frontend' / 'bazis-front.lock.json').write_text('{"assets": {}}')
     for index in range(scenarios):
         (generated / f'scenario-{index}.spec.ts').write_text('')
     (generated / 'product.ts').write_text('')
@@ -192,10 +192,16 @@ def test_written_screens(tmp_path, monkeypatch):
     for name, lines in files.items():
         (source / name).parent.mkdir(parents=True, exist_ok=True)
         (source / name).write_text('x\n' * lines)
+    # the shadcn components that bazis-front copied are in its lock: not the product's
+    (source / 'components' / 'ui').mkdir(parents=True)
+    (source / 'components' / 'ui' / 'button.tsx').write_text('x\n' * 100)
+    (source.parent / 'bazis-front.lock.json').write_text(json.dumps({
+        'assets': {'button': {'files': {'src/components/ui/button.tsx': 'sha256:0'}}},
+    }))
 
     check = grade.written_screens(tmp_path, {})
 
-    assert not check.passed
+    assert not check.passed and check.name.startswith('no TSX of its own')
     assert check.detail == (
         'lines of TSX written by hand: 36; not of a custom or extended screen: '
         'components/badge.tsx, screens/book-list/index.tsx, screens/loan-list-extra/index.tsx, '
@@ -219,6 +225,7 @@ def test_written_screens_reads_the_specs(tmp_path):
     (tmp_path / 'spec' / 'screens' / 'book-list.yaml').write_text('id: book-list\nprimitive: list\n')
     (tmp_path / 'frontend' / 'src' / 'screens' / 'loan-list').mkdir(parents=True)
     (tmp_path / 'frontend' / 'src' / 'screens' / 'loan-list' / 'index.tsx').write_text('x\n')
+    (tmp_path / 'frontend' / 'bazis-front.lock.json').write_text('{"assets": {}}')
 
     check = grade.written_screens(tmp_path, {**os.environ})
 

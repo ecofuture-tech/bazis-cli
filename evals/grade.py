@@ -27,6 +27,7 @@ The grader runs on POSIX only (macOS, Linux): it stops the servers and the comma
 starts by their process group.
 """
 
+import json
 import os
 import re
 import secrets
@@ -50,8 +51,9 @@ BAZIS_CHECK_PREFIXES = (
     'async_request.', 'bg.', 'front.',
 )
 TIMEOUT = 900
-#: the TSX of `frontend/src/` that a product does not write: the copies of bazis-front, the
-#: generated screens and the template (its entry, its app and its login)
+#: the TSX of `frontend/src/` that a product does not write: the generated screens and the
+#: template (its entry, its app and its login), besides the assets that bazis-front copied
+#: (the files of `assets` in its lock, among them the shadcn components of `components/ui/`)
 NOT_WRITTEN = ('bazis/', 'screens/generated/', 'main.tsx', 'app/', 'screens/login/')
 #: prints `custom` and `extend` of the specs of the screens by their ids, as JSON (run with the
 #: Python of the project, which has PyYAML with bazis-front)
@@ -318,11 +320,11 @@ def written_screens(project: Path, env: dict) -> Check:
     directory `screens/<id>/`, or the module it names) or of an extended one (`extend`: its
     directory). The detail counts the lines of that TSX, a measure of the hand-written code.
     """
-    name = 'no TSX of its own but that of the custom and extended screens'
+    title = 'no TSX of its own but that of the custom and extended screens'
     specs = run(project, ['-c', SCREEN_SPECS], env)
     screens = mcp_project.parse_json(specs.stdout)
     if screens is None:
-        return Check(name, False, 'the specs of the screens: ' + tail(specs, 4))
+        return Check(title, False, 'the specs of the screens: ' + tail(specs, 4))
     allowed = []
     for id_, spec in screens.items():
         custom = spec.get('custom')
@@ -332,16 +334,21 @@ def written_screens(project: Path, env: dict) -> Check:
             module = custom['module'].removeprefix('@/')
             allowed += [f'{module}.tsx', f'{module}/']
     source = project / 'frontend' / 'src'
+    lock = json.loads((project / 'frontend' / 'bazis-front.lock.json').read_text(encoding='utf-8'))
+    copied = {
+        file.removeprefix('src/') for asset in lock['assets'].values() for file in asset['files']
+    }
     written = {
         name: path for path in sorted(source.rglob('*.tsx'))
         if not (name := path.relative_to(source).as_posix()).startswith(NOT_WRITTEN)
+        and name not in copied
     }
     lines = sum(len(path.read_text(encoding='utf-8').splitlines()) for path in written.values())
     other = [name for name in written if not name.startswith(tuple(allowed))]
     detail = f'lines of TSX written by hand: {lines}'
     if other:
         detail += '; not of a custom or extended screen: ' + ', '.join(other)
-    return Check(name, not other, detail)
+    return Check(title, not other, detail)
 
 
 def project_package(project: Path) -> str:
