@@ -54,8 +54,9 @@ bazis change          # the changes typed one after another; an empty line ends
   [bazis-front](https://github.com/ecofuture-tech/bazis-front): the specs of the product
   (`spec/`: roles, entities, workflows, access, scenarios, screens, design), the backend
   that satisfies them, the contract exported from it (`contract/`), a React + TypeScript
-  frontend (`frontend/`) with the screens composed from the components of bazis-front,
-  and the end-to-end tests of the scenarios run against the backend. It needs Node.js
+  frontend (`frontend/`) with the screens generated from their specs (`bazis_front
+  screens`), the end-to-end tests of the scenarios run against the backend and the
+  screenshots of the screens looked at by the agent. It needs Node.js
   22.12 or newer with npm, and PostgreSQL for the contract and the end-to-end tests;
   `--no-frontend` builds only the backend.
 - The product is in the language of its description and in English, the language of the

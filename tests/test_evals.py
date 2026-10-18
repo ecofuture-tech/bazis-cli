@@ -17,6 +17,8 @@ import os
 import subprocess
 import time
 
+import pytest
+
 from bazis.contrib.mcp import catalog, scaffold
 
 from evals import grade, run
@@ -111,8 +113,6 @@ def test_summary(tmp_path):
 
 
 def test_running_needs_a_budget():
-    import pytest
-
     with pytest.raises(SystemExit, match='budget'):
         run.main_cli(['--task', 'tracker'])
 
@@ -139,6 +139,8 @@ def test_frontend_checks(tmp_path, monkeypatch):
 
     def fake_run(project, args, env):
         commands.append(args)
+        if args[0] == '-c':
+            return done(0, '{}')
         if args[2] == 'check':
             return done(1, json.dumps({'contract': True, 'errors': 1, 'warnings': 1, 'issues': issues}))
         return done(1 if args[2] == 'e2e' else 0)
@@ -153,10 +155,74 @@ def test_frontend_checks(tmp_path, monkeypatch):
     assert checks['specs valid against the contract'].detail == 'P019 spec/product.yaml#/roles/0'
     assert not checks['at least 3 scenarios'].passed
     assert checks['at least 3 scenarios'].detail == 'scenario-0.spec, scenario-1.spec'
-    assert not checks['theme and end-to-end tests generated'].passed
+    assert not checks['theme, screens, end-to-end tests and screenshots generated'].passed
+    assert checks['no TSX of its own but that of the custom and extended screens'].passed
     assert checks['frontend builds'].passed
     assert not checks['frontend lint and component tests pass'].passed
-    assert ['manage.py', 'bazis_front', 'design', '--check'] in commands
+    for command in ('design', 'screens', 'e2e', 'shots'):
+        assert ['manage.py', 'bazis_front', command, '--check'] in commands
+
+
+def test_written_screens(tmp_path, monkeypatch):
+    """
+    The TSX that a product writes is only that of its custom and extended screens: not of a
+    screen generated from its spec, nor elsewhere in `src/`; the copies, the generated
+    screens and the template are not its own. The lines written are counted.
+    """
+    screens = {
+        'loan-list': {'custom': True},
+        'book-card': {'extend': True},
+        'reader-list': {'custom': {'module': '@/screens/readers', 'export': 'ReaderListScreen'}},
+        'book-list': {},
+    }
+    monkeypatch.setattr(grade, 'run', lambda project, args, env: done(0, json.dumps(screens)))
+    source = tmp_path / 'frontend' / 'src'
+    files = {
+        # the custom and extended screens, their own files too
+        'screens/loan-list/index.tsx': 3, 'screens/loan-list/parts.tsx': 2,
+        'screens/book-card/extend.tsx': 4, 'screens/readers.tsx': 1,
+        # not the product's
+        'screens/generated/book-list.tsx': 50, 'bazis/ui/list/index.tsx': 50,
+        'app/router.tsx': 50, 'main.tsx': 50, 'screens/login/index.tsx': 50,
+        'screens/book-list/index.tsx': 5, 'components/badge.tsx': 6,
+        'screens/loan-list-extra/index.tsx': 7, 'i18n/en.ts': 50,
+        # the screen of a custom module elsewhere has no directory of its own
+        'screens/reader-list/index.tsx': 8,
+    }
+    for name, lines in files.items():
+        (source / name).parent.mkdir(parents=True, exist_ok=True)
+        (source / name).write_text('x\n' * lines)
+
+    check = grade.written_screens(tmp_path, {})
+
+    assert not check.passed
+    assert check.detail == (
+        'lines of TSX written by hand: 36; not of a custom or extended screen: '
+        'components/badge.tsx, screens/book-list/index.tsx, screens/loan-list-extra/index.tsx, '
+        'screens/reader-list/index.tsx'
+    )
+
+    for name in ('screens/book-list/index.tsx', 'components/badge.tsx', 'screens/loan-list-extra/index.tsx',
+                 'screens/reader-list/index.tsx'):
+        (source / name).unlink()
+    check = grade.written_screens(tmp_path, {})
+    assert check.passed and check.detail == 'lines of TSX written by hand: 10'
+
+
+def test_written_screens_reads_the_specs(tmp_path):
+    """
+    The specs of the screens are read with the Python of the project (PyYAML of bazis-front).
+    """
+    pytest.importorskip('yaml')
+    (tmp_path / 'spec' / 'screens').mkdir(parents=True)
+    (tmp_path / 'spec' / 'screens' / 'loan-list.yaml').write_text('id: loan-list\ncustom: true\n')
+    (tmp_path / 'spec' / 'screens' / 'book-list.yaml').write_text('id: book-list\nprimitive: list\n')
+    (tmp_path / 'frontend' / 'src' / 'screens' / 'loan-list').mkdir(parents=True)
+    (tmp_path / 'frontend' / 'src' / 'screens' / 'loan-list' / 'index.tsx').write_text('x\n')
+
+    check = grade.written_screens(tmp_path, {**os.environ})
+
+    assert check.passed and check.detail == 'lines of TSX written by hand: 1'
 
 
 def test_frontend_checks_without_a_frontend(tmp_path):

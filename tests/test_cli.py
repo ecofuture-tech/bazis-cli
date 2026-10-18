@@ -337,8 +337,11 @@ def test_add_to_a_product_with_a_frontend(tmp_path, fake_agent, capsys):
     assert 'package_guide("bazis-statusy")' in backend
     # a project made before the ports gets them
     assert prompts.ports_text(scaffold.project_ports(tmp_path)) in frontend
-    order = ['spec/', 'bazis_front contract', 'front_check', 'front_catalog', 'bazis_front add',
-             'bazis_front e2e', 'e2e_data', 'the final checks of the rules']
+    # the screens generated again, then the whole round of the final checks (bazis-mcp 2.6)
+    frontend = ' '.join(frontend.split())
+    order = ['spec/', 'bazis_front contract', 'front_check', 'bazis_front screens',
+             'bazis_front e2e', 'e2e_data', 'the whole round of the final checks of the rules',
+             'npm run build', 'bazis_front screens --check']
     positions = [frontend.index(text) for text in order]
     assert positions == sorted(positions)
     assert FRONTEND_RULES in options.system_prompt['append']
@@ -359,7 +362,7 @@ def test_add_the_frontend(tmp_path, fake_agent):
     assert '"Building the frontend of a product"' in prompt
     assert 'the final checks of the rules' in prompt
     assert 'the specs describe the backend and what the project needs it for' in prompt
-    assert 'requirement `bazis-front>=0.1.0`' in prompt
+    assert f'requirement `{scaffold.FRONTEND_REQUIREMENT}`' in prompt
     assert FRONTEND_RULES in options.system_prompt['append']
 
 
@@ -372,7 +375,7 @@ def test_add_the_frontend_from_a_build(tmp_path, fake_agent, monkeypatch):
 
     prompt, _ = fake_agent[0]
     assert 'requirement `/wheels/bazis_front-0.1.0.whl`' in prompt
-    assert 'bazis-front>=0.1.0' not in prompt
+    assert scaffold.FRONTEND_REQUIREMENT not in prompt
 
 
 def test_add_without_node(tmp_path, fake_agent, monkeypatch, capsys):

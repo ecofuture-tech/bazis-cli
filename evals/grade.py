@@ -18,8 +18,9 @@ Python of the project (`.venv`) against PostgreSQL and Redis of `.env`. It does 
 on the names the agent chose: it checks that the project loads and passes its checks, has
 the expected Bazis packages, complete migrations that apply, models and routes of its own,
 and tests that pass. A product with a frontend (`frontend = true`) also needs specs valid
-against a fresh contract, generated files that are not stale, a frontend that builds and
-passes its lint and component tests, and end-to-end tests of its scenarios that pass
+against a fresh contract, generated files that are not stale, screens generated from their
+specs (no TSX of its own but that of its custom and extended screens), a frontend that
+builds and passes its lint and component tests, and end-to-end tests of its scenarios that pass
 against the backend with the test data of `manage.py e2e_data` (Node.js is needed). A task
 with a `language` needs the product in that language and in English, with its catalog.
 The grader runs on POSIX only (macOS, Linux): it stops the servers and the commands it
@@ -49,6 +50,16 @@ BAZIS_CHECK_PREFIXES = (
     'async_request.', 'bg.', 'front.',
 )
 TIMEOUT = 900
+#: the TSX of `frontend/src/` that a product does not write: the copies of bazis-front, the
+#: generated screens and the template (its entry, its app and its login)
+NOT_WRITTEN = ('bazis/', 'screens/generated/', 'main.tsx', 'app/', 'screens/login/')
+#: prints `custom` and `extend` of the specs of the screens by their ids, as JSON (run with the
+#: Python of the project, which has PyYAML with bazis-front)
+SCREEN_SPECS = """\
+import json, pathlib, yaml
+specs = [yaml.safe_load(path.read_text(encoding='utf-8')) for path in pathlib.Path('spec/screens').glob('*.yaml')]
+print(json.dumps({it['id']: {key: it[key] for key in ('custom', 'extend') if key in it} for it in specs}))
+"""
 
 
 @dataclass
@@ -278,12 +289,14 @@ def frontend_checks(project: Path, env: dict, min_scenarios: int) -> list[Check]
     stale = [
         done for done in (
             run(project, ['manage.py', 'bazis_front', command, '--check'], env)
-            for command in ('design', 'e2e')
+            for command in ('design', 'screens', 'e2e', 'shots')
         ) if done.returncode
     ]
     checks.append(Check(
-        'theme and end-to-end tests generated', not stale, '\n'.join(tail(d, 4) for d in stale),
+        'theme, screens, end-to-end tests and screenshots generated', not stale,
+        '\n'.join(tail(d, 4) for d in stale),
     ))
+    checks.append(written_screens(project, env))
 
     build = npm(frontend, ['run', 'build'], env)
     checks.append(Check('frontend builds', build.returncode == 0, tail(build, 8)))
@@ -296,6 +309,39 @@ def frontend_checks(project: Path, env: dict, min_scenarios: int) -> list[Check]
         'frontend lint and component tests pass', failed is None, tail(failed, 8) if failed else '',
     ))
     return checks
+
+
+def written_screens(project: Path, env: dict) -> Check:
+    """
+    The screens are generated from their specs: the TSX that the product writes in
+    `frontend/src/` (not NOT_WRITTEN) is only the code of a custom screen (`custom`: its
+    directory `screens/<id>/`, or the module it names) or of an extended one (`extend`: its
+    directory). The detail counts the lines of that TSX, a measure of the hand-written code.
+    """
+    name = 'no TSX of its own but that of the custom and extended screens'
+    specs = run(project, ['-c', SCREEN_SPECS], env)
+    screens = mcp_project.parse_json(specs.stdout)
+    if screens is None:
+        return Check(name, False, 'the specs of the screens: ' + tail(specs, 4))
+    allowed = []
+    for id_, spec in screens.items():
+        custom = spec.get('custom')
+        if custom is True or spec.get('extend'):
+            allowed.append(f'screens/{id_}/')
+        elif custom:
+            module = custom['module'].removeprefix('@/')
+            allowed += [f'{module}.tsx', f'{module}/']
+    source = project / 'frontend' / 'src'
+    written = {
+        name: path for path in sorted(source.rglob('*.tsx'))
+        if not (name := path.relative_to(source).as_posix()).startswith(NOT_WRITTEN)
+    }
+    lines = sum(len(path.read_text(encoding='utf-8').splitlines()) for path in written.values())
+    other = [name for name in written if not name.startswith(tuple(allowed))]
+    detail = f'lines of TSX written by hand: {lines}'
+    if other:
+        detail += '; not of a custom or extended screen: ' + ', '.join(other)
+    return Check(name, not other, detail)
 
 
 def project_package(project: Path) -> str:
