@@ -225,28 +225,7 @@ def grade(project: Path, task: dict) -> list[Check]:
 
     if task.get('frontend'):
         checks += frontend_checks(project, env, task.get('min_scenarios', 1))
-    server = mcp_project.parse_json(run(project, ['manage.py', 'shell', '-c', DATABASE_SERVER], env).stdout)
-    if shutil.which('createdb') and server:
-        client_env = {**env, 'PGPASSWORD': server['password'] or ''}
-        created = subprocess.run(
-            postgres_command('createdb', server, database),
-            env=client_env, capture_output=True, text=True,
-        )
-        try:
-            migrate = run(project, ['manage.py', 'migrate', '--noinput'], env)
-            migrated = created.returncode == 0 and migrate.returncode == 0
-            checks.append(Check(
-                'migrations apply', migrated, created.stderr.strip() or tail(migrate, 6),
-            ))
-            if task.get('frontend'):
-                checks += frontend_database_checks(project, env, migrated)
-        finally:
-            subprocess.run(
-                postgres_command('dropdb', server, '--if-exists', '--force', database),
-                env=client_env, capture_output=True,
-            )
-    elif task.get('frontend'):
-        checks += frontend_database_checks(project, env, False, 'no PostgreSQL (createdb)')
+    checks += database_checks(project, env, database, bool(task.get('frontend')))
 
     collected = run(project, ['-m', 'pytest', '--collect-only', '-q', '-p', 'no:cacheprovider'], env)
     count = re.search(r'(\d+) tests? collected', collected.stdout)
@@ -258,6 +237,44 @@ def grade(project: Path, task: dict) -> list[Check]:
     else:
         checks.append(Check('tests pass', False, 'no tests'))
     return checks
+
+
+def database_checks(project: Path, env: dict, database: str, frontend: bool) -> list[Check]:
+    """
+    The checks that need the database of the grading: the migrations apply to a database
+    created on the server of the project (dropped afterwards), then the checks of the
+    frontend on it. Without `createdb` or the server of the project they fail with the
+    reason instead of dropping out of the result.
+    """
+    server = None
+    if shutil.which('createdb'):
+        probe = run(project, ['manage.py', 'shell', '-c', DATABASE_SERVER], env)
+        server = mcp_project.parse_json(probe.stdout)
+        reason = 'server of the database: ' + (tail(probe, 6) or 'no output')
+    else:
+        reason = 'no PostgreSQL (createdb)'
+    if not server:
+        checks = [Check('migrations apply', False, reason)]
+        if frontend:
+            checks += frontend_database_checks(project, env, False, reason)
+        return checks
+    client_env = {**env, 'PGPASSWORD': server['password'] or ''}
+    created = subprocess.run(
+        postgres_command('createdb', server, database),
+        env=client_env, capture_output=True, text=True,
+    )
+    try:
+        migrate = run(project, ['manage.py', 'migrate', '--noinput'], env)
+        migrated = created.returncode == 0 and migrate.returncode == 0
+        checks = [Check('migrations apply', migrated, created.stderr.strip() or tail(migrate, 6))]
+        if frontend:
+            checks += frontend_database_checks(project, env, migrated)
+        return checks
+    finally:
+        subprocess.run(
+            postgres_command('dropdb', server, '--if-exists', '--force', database),
+            env=client_env, capture_output=True,
+        )
 
 
 def language_check(project: Path, info: dict, language: str, env: dict) -> Check:

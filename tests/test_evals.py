@@ -285,6 +285,50 @@ def test_frontend_database_checks_without_a_database(tmp_path):
     ]
 
 
+def probe_stub(monkeypatch, output: str, returncode: int = 0):
+    monkeypatch.setattr(grade.shutil, 'which', lambda name: '/usr/bin/createdb')
+    monkeypatch.setattr(grade, 'run', lambda project, args, env: done(returncode, output))
+
+
+@pytest.mark.parametrize('frontend', [False, True])
+@pytest.mark.parametrize('output', ['Traceback: no module', 'not json'])
+def test_database_checks_fail_when_the_server_is_unknown(tmp_path, monkeypatch, frontend, output):
+    probe_stub(monkeypatch, output, 1)
+    project = product(tmp_path, 1)
+    checks = grade.database_checks(project, {}, 'eval_x', frontend)
+    reason = 'server of the database: ' + output
+    expected = [('migrations apply', False, reason)]
+    if frontend:
+        expected += [('contract fresh', False, reason), ('end-to-end tests pass', False, reason)]
+    assert [(c.name, c.passed, c.detail) for c in checks] == expected
+
+
+@pytest.mark.parametrize('frontend', [False, True])
+def test_database_checks_without_createdb(tmp_path, monkeypatch, frontend):
+    monkeypatch.setattr(grade.shutil, 'which', lambda name: None)
+    monkeypatch.setattr(grade, 'run', lambda *a: pytest.fail('the server must not be probed'))
+    checks = grade.database_checks(product(tmp_path, 1), {}, 'eval_x', frontend)
+    assert [(c.name, c.passed, c.detail) for c in checks][0] == (
+        'migrations apply', False, 'no PostgreSQL (createdb)',
+    )
+    assert len(checks) == (3 if frontend else 1)
+
+
+def test_database_checks_create_migrate_and_drop(tmp_path, monkeypatch):
+    server = {'host': 'db', 'port': None, 'user': 'owner', 'password': 'secret'}
+    probe_stub(monkeypatch, json.dumps(server))
+    commands = []
+
+    def fake_subprocess(command, **kwargs):
+        commands.append(command[0])
+        return subprocess.CompletedProcess(command, 0, '', '')
+
+    monkeypatch.setattr(grade.subprocess, 'run', fake_subprocess)
+    checks = grade.database_checks(tmp_path, {}, 'eval_x', False)
+    assert [(c.name, c.passed) for c in checks] == [('migrations apply', True)]
+    assert commands == ['createdb', 'dropdb']
+
+
 def test_end_to_end_needs_the_test_data(tmp_path, monkeypatch):
     monkeypatch.setattr(grade, 'run', lambda project, args, env: done(1, 'Unknown command: e2e_data'))
     check = grade.end_to_end(product(tmp_path, 1), {})
