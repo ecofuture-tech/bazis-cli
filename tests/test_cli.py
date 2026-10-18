@@ -508,7 +508,11 @@ def test_change(tmp_path, fake_agent, sessions, capsys):
     assert main.main(['change', 'Add the authors', *project, '--budget', '2']) == 0
     prompt, options = fake_agent[-1]
     assert options.resume == 's' and options.max_budget_usd == 2
-    assert prompt == 'Add the authors\n\nAfter the change, run the final checks of the rules once.\n'
+    # the request, the final checks once, and the headings of the summary (bazis-mcp 2.6)
+    assert prompt == (
+        'Add the authors\n\nAfter the change, run the final checks of the rules once.\n\n'
+        f'{prompts.SUMMARY}\n'
+    )
 
     assert main.main(['change', 'Add the authors', *project, '--new-session']) == 0
     assert fake_agent[-1][1].resume is None
