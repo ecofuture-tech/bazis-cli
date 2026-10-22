@@ -50,11 +50,13 @@ bazis change          # the changes typed one after another; an empty line ends
   `requirements.txt`, `requirements-dev.txt`, `tests/`, `.mcp.json` and `AGENTS.md`, and
   chooses free ports for the servers of the project (`.bazis/ports.json`). It creates
   `.venv` with Bazis and bazis-mcp (with uv if it is installed; `--no-venv` skips it),
-  raises the minimums of the requirements to the installed releases, and the database of `.env` (on the server of `--database host:port`, else that of the environment, else
-  localhost:5432, named in `.env` before the database is made) with PostGIS when PostgreSQL is reachable (else it says
-  so and goes on; a database of that name with the data of another project is left as it
-  is, and the first free `<name>_N` is created and set in `.env` instead). Then the agent chooses the Bazis packages, creates the apps, models,
-  routes, migrations and tests, and runs the checks.
+  raises the minimums of the requirements to the installed releases, and the database of
+  `.env` (on the server of `--database host:port`, else that of the environment, else
+  localhost:5432, named in `.env` before the database is made) with PostGIS when
+  PostgreSQL is reachable (else it says so and goes on; a database of that name with the
+  data of another project is left as it is, and the first free `<name>_N` is created and
+  set in `.env` instead). Then the agent chooses the Bazis packages, creates the apps,
+  models, routes, migrations and tests, and runs the checks.
 - By default `bazis new` builds the whole product with its frontend, made by
   [bazis-front](https://github.com/ecofuture-tech/bazis-front): the specs of the product
   (`spec/`: roles, entities, workflows, access, scenarios, screens, design), the backend
@@ -66,9 +68,9 @@ bazis change          # the changes typed one after another; an empty line ends
   `--no-frontend` builds only the backend.
 - The product is in the language of its description alone, unless the description asks for
   more (`BS_LANGUAGES`, `BS_LANGUAGE_CODE`); `--language CODE` (a code of Django such as
-  `ru` or `pt-br`) chooses it instead. The msgids of the code are English. The texts of the backend are
-  translated in its gettext catalog and those of the screens in the dictionaries of the
-  frontend.
+  `ru` or `pt-br`) chooses it instead. The msgids of the code are English. The texts of
+  the backend are translated in its gettext catalog and those of the screens in the
+  dictionaries of the frontend.
 - `bazis add PACKAGE [GOAL]` installs a Bazis package with the Bazis packages it requires
   and sets them up as their guides say, in the frontend too when the project has one.
   `bazis add bazis-front` builds the frontend of a backend.

@@ -6,17 +6,19 @@ Bazis. It is a tool for the developer's machine, not a dependency of a project.
 
 ## Commands
 
-- `bazis new DIR "what the product does"` (`--name` is normalized to an identifier, `master-na-chas` becomes `master_na_chas`) writes the skeleton of a project (package with
+- `bazis new DIR "what the product does"` writes the skeleton of a project (package with
   settings, root router and ASGI app, `project.env`, `.env` with a generated secret key,
   `requirements*.txt`, `tests/`, `.mcp.json`, `AGENTS.md`, `.bazis/ports.json` with free
   ports of this machine for the backend, the dev server of the frontend and that of the
   end-to-end tests), creates `.venv` with Bazis and bazis-mcp (`--no-venv` skips it), raises
-  the minimums of the requirements to the installed releases (`X.Y.Z`) and the database of the settings of the project (`.env`,
-  the `BS_DATABASES__DEFAULT__*` variables; the server is `--database host:port`, else that
-  of the environment, else localhost:5432, resolved by `project.database_server` of
+  the minimums of the requirements to the installed releases (`X.Y.Z`) and the database
+  of the settings of the project (`.env`, the `BS_DATABASES__DEFAULT__*` variables; the
+  server is `--database host:port`, else that of the environment, else localhost:5432, resolved by
+  `project.database_server` of
   bazis-mcp and written to `.env` before the database is made; a refused `--database`
-  stops the command before anything is written) with the extension PostGIS when PostgreSQL is
-  reachable and the database is missing (it says when it cannot, when PostGIS could not be
+  stops the command before anything is written) with the extension PostGIS when
+  PostgreSQL is reachable and the database is missing (it says when it cannot, when
+  PostGIS could not be
   installed, and when an existing database has tables, probably of another project, and
   goes on; the agent is told what it did), then the agent chooses the Bazis packages and builds the apps,
   migrations and tests. By default the product also gets its frontend: bazis-front
@@ -28,8 +30,9 @@ Bazis. It is a tool for the developer's machine, not a dependency of a project.
   22.12 or newer with npm (checked before anything is written); `--no-frontend` builds
   only the backend. The product is in the language of the description (the agent sets
   `BS_LANGUAGES` and `BS_LANGUAGE_CODE`) or of `--language CODE` (written by the
-  skeleton) alone, unless the description asks for more: English msgids with `gettext_lazy`, the catalogs of
-  the project `locale/<language>/LC_MESSAGES/django.po` made, filled and compiled by
+  skeleton) alone, unless the description asks for more: English msgids with
+  `gettext_lazy`, the catalogs of the project `locale/<language>/LC_MESSAGES/django.po`
+  made, filled and compiled by
   `manage.py bazis_messages` (`make`, the translations in `locale/translations.json`,
   `apply`; a msgid of the packages that `bazis.W004` names declared with `gettext_noop` in
   `<project>/translations.py` and translated so too), the texts of the screens through
@@ -38,6 +41,8 @@ Bazis. It is a tool for the developer's machine, not a dependency of a project.
   the shared Redis; the pytest plugin of bazis-test-utils installs the triggers of the test
   database and `migrate` applies the declared roles and workflows, so it has no other
   fixture.
+- `--name` of `bazis new` is normalized to an identifier (`master-na-chas` becomes
+  `master_na_chas`).
 - `bazis add PACKAGE ["what for"]` installs a Bazis package and its Bazis dependencies and
   sets them up as their guides say. In a project with a frontend
   (`frontend/bazis-front.lock.json`) it then exports the contract, fixes `check`, copies
