@@ -32,6 +32,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from bazis.contrib.cli import agent
+from bazis.contrib.mcp import project as mcp_project
 from bazis.contrib.mcp import prompts, scaffold
 from bazis.contrib.mcp.rules import FRONTEND_RULES
 
@@ -58,7 +59,8 @@ async def build(task: dict, project: Path, args) -> dict:
     name = scaffold.package_name(project)
     frontend = task.get('frontend', False)
     # without --language: the agent finds the `language` of a task in its description
-    scaffold.write_files(project, name, frontend=frontend)
+    server = mcp_project.database_server(None, default=scaffold.DEFAULT_DATABASE_SERVER)
+    scaffold.write_files(project, name, frontend=frontend, database=server)
     database = scaffold.create_database(project, name, scaffold.create_venv(project))
     started = time.monotonic()
     with (project.parent / f'{task["id"]}.log').open('w', encoding='utf-8') as log:

@@ -14,8 +14,8 @@ Bazis (`bazis.contrib.mcp.rules.RULES`).
   server about them do not apply).
 
 The skeleton of a new project and its `.venv` (bazis-front in its requirements and apps
-unless `--no-frontend`, its languages: `--language`, else English until the agent sets the
-language of the description, the check of Node.js), the rules and the tasks of the agent
+unless `--no-frontend`, its language: `--language`, else English until the agent sets the
+language of the description (the product has that language alone), the check of Node.js), the rules and the tasks of the agent
 are in bazis-mcp (`bazis.contrib.mcp.scaffold`, `rules`, `prompts`), with their tests.
 `--language` is checked by the Django of the Python of the CLI (bazis is its dependency),
 before anything is written.

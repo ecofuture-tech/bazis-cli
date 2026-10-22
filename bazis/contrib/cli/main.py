@@ -31,7 +31,7 @@ from pathlib import Path
 
 from claude_agent_sdk import ClaudeSDKError, CLIConnectionError, ResultMessage
 
-from bazis.contrib.mcp import prompts, scaffold
+from bazis.contrib.mcp import project, prompts, scaffold
 from bazis.contrib.mcp.rules import FRONTEND_RULES
 
 from . import __version__, agent
@@ -39,7 +39,7 @@ from . import __version__, agent
 
 def new_task(args) -> agent.Task:
     directory = args.directory.resolve()
-    name = args.name or scaffold.package_name(directory)
+    name = scaffold.package_name(args.name or directory)
     frontend = not args.no_frontend
     # the Django of the CLI (bazis), before anything is written
     language = scaffold.product_language(args.language) if args.language else None
@@ -47,7 +47,10 @@ def new_task(args) -> agent.Task:
         raise scaffold.ScaffoldError(
             f'{problem}. Install it, or pass --no-frontend to build only the backend.'
         )
-    scaffold.write_files(directory, name, frontend=frontend)
+    # the server is chosen before anything is written: `.env` names it whatever becomes of the
+    # database
+    database = project.database_server(args.database, default=scaffold.DEFAULT_DATABASE_SERVER)
+    scaffold.write_files(directory, name, frontend=frontend, database=database)
     if language:
         scaffold.set_language(directory, language)
     print(f'Created the project {name} in {directory}')
@@ -61,10 +64,10 @@ def new_task(args) -> agent.Task:
                 f'{err}\nThe files of the project are written: create .venv and install '
                 f'requirements-dev.txt by hand, or delete {directory} and run bazis new again.'
             ) from err
-    database = scaffold.create_database(directory, name, python)
-    print(database)
+    created = scaffold.create_database(directory, name, python)
+    print(created)
     ports = scaffold.project_ports(directory)
-    prompt = prompts.new_prompt(args.description, name, frontend, language, database, ports)
+    prompt = prompts.new_prompt(args.description, name, frontend, language, created, ports)
     return _task(args, prompt, directory, frontend=frontend)
 
 
@@ -211,11 +214,21 @@ def parser() -> argparse.ArgumentParser:
     new = commands.add_parser('new', parents=[common], help='Create and build a project.')
     new.add_argument('directory', type=Path, help='A new or empty directory.')
     new.add_argument('description', help='What the project does, in your words.')
-    new.add_argument('--name', help='The project package (default: from the directory name).')
+    new.add_argument(
+        '--name',
+        help='The project package, the name of the product as an identifier: master-na-chas '
+        'becomes master_na_chas (default: from the directory name).',
+    )
+    new.add_argument(
+        '--database',
+        help='The PostgreSQL server of the project, host:port (default: '
+        'BS_DATABASES__DEFAULT__HOST and PORT of the environment, else localhost:5432).',
+    )
     new.add_argument(
         '--language',
-        help='The language of the product, a code such as ru, de or pt-br; English is always '
-        'one of its languages (default: the language of the description).',
+        help='The language of the product, a code such as ru, de or pt-br; the product has that '
+        'language alone unless the description asks for more (default: the language of the '
+        'description).',
     )
     new.add_argument('--no-venv', action='store_true', help='Do not create .venv.')
     new.add_argument(
@@ -285,7 +298,7 @@ def main(argv: list[str] | None = None) -> int:
         return change(args)
     try:
         task = args.make_task(args)
-    except scaffold.ScaffoldError as err:
+    except (scaffold.ScaffoldError, project.ProjectError) as err:
         print(f'bazis: {err}', file=sys.stderr)
         return 1
     code, result = run(task)

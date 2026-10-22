@@ -36,8 +36,8 @@ classifiers = [
 dependencies = [
     # the settings of a project without .venv (--no-venv), the languages of Django and the
     # modules a project package must not hide are those of the Python of the CLI
-    "bazis>=2.16.0",
-    "bazis-mcp>=2.6.0",
+    "bazis>=2.22.0",
+    "bazis-mcp>=2.12.0",
     "claude-agent-sdk>=0.2.163",
 ]
 
