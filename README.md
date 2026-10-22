@@ -26,8 +26,12 @@ users see only their own orders"
 # only the backend
 bazis new shop "..." --no-frontend
 
-# a product in Russian (by default in the language of the description), always also in English
+# a product in Russian (by default in the language of the description)
 bazis new shop "..." --language ru
+
+# a database on another PostgreSQL server (default: BS_DATABASES__DEFAULT__HOST and PORT
+# of the environment, else localhost:5432)
+bazis new shop "..." --database db.internal:5433
 
 # a Bazis package for an existing project (run in the directory of manage.py)
 bazis add bazis-statusy "orders go through new -> paid -> shipped"
@@ -46,10 +50,13 @@ bazis change          # the changes typed one after another; an empty line ends
   `requirements.txt`, `requirements-dev.txt`, `tests/`, `.mcp.json` and `AGENTS.md`, and
   chooses free ports for the servers of the project (`.bazis/ports.json`). It creates
   `.venv` with Bazis and bazis-mcp (with uv if it is installed; `--no-venv` skips it),
-  raises the minimums of the requirements to the installed releases, and the database of `.env` with PostGIS when PostgreSQL is reachable (else it says
-  so and goes on; a database of that name with the data of another project is left as it
-  is, and the first free `<name>_N` is created and set in `.env` instead). Then the agent chooses the Bazis packages, creates the apps, models,
-  routes, migrations and tests, and runs the checks.
+  raises the minimums of the requirements to the installed releases, and the database of
+  `.env` (on the server of `--database host:port`, else that of the environment, else
+  localhost:5432, named in `.env` before the database is made) with PostGIS when
+  PostgreSQL is reachable (else it says so and goes on; a database of that name with the
+  data of another project is left as it is, and the first free `<name>_N` is created and
+  set in `.env` instead). Then the agent chooses the Bazis packages, creates the apps,
+  models, routes, migrations and tests, and runs the checks.
 - By default `bazis new` builds the whole product with its frontend, made by
   [bazis-front](https://github.com/ecofuture-tech/bazis-front): the specs of the product
   (`spec/`: roles, entities, workflows, access, scenarios, screens, design), the backend
@@ -59,11 +66,11 @@ bazis change          # the changes typed one after another; an empty line ends
   screenshots of the screens looked at by the agent. It needs Node.js
   22.12 or newer with npm, and PostgreSQL for the contract and the end-to-end tests;
   `--no-frontend` builds only the backend.
-- The product is in the language of its description and in English, the language of the
-  msgids of the code (`BS_LANGUAGES`, `BS_LANGUAGE_CODE`); `--language CODE` (a code of
-  Django such as `ru` or `pt-br`) chooses it instead. The texts of the backend are
-  translated in its gettext catalog and those of the screens in the dictionaries of the
-  frontend.
+- The product is in the language of its description alone, unless the description asks for
+  more (`BS_LANGUAGES`, `BS_LANGUAGE_CODE`); `--language CODE` (a code of Django such as
+  `ru` or `pt-br`) chooses it instead. The msgids of the code are English. The texts of
+  the backend are translated in its gettext catalog and those of the screens in the
+  dictionaries of the frontend.
 - `bazis add PACKAGE [GOAL]` installs a Bazis package with the Bazis packages it requires
   and sets them up as their guides say, in the frontend too when the project has one.
   `bazis add bazis-front` builds the frontend of a backend.

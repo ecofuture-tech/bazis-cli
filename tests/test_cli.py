@@ -83,6 +83,8 @@ def environment(monkeypatch):
     """
     monkeypatch.setattr(scaffold, 'node_problem', lambda: None)
     monkeypatch.delenv(scaffold.FRONTEND_REQUIREMENT_ENV, raising=False)
+    for variable in scaffold.DATABASE_SERVER.values():
+        monkeypatch.delenv(variable, raising=False)
     calls = []
 
     def fake_create_database(directory, name, python=sys.executable):
@@ -249,6 +251,7 @@ def test_new(tmp_path, fake_agent, capsys, environment):
     # the language of the product is that of the description
     assert 'the language of the description' in prompt and 'BS_LANGUAGE_CODE=<code>' in prompt
     assert 'BS_LANGUAGE_CODE=en\n' in (directory / 'project.env').read_text()
+    assert server_of(directory) == ('localhost', '5432')
     assert DATABASE_CREATED in out.out
     assert 'Reading the guide.' in out.out
     assert '> package_guide bazis' in out.out
@@ -295,7 +298,8 @@ def test_new_with_a_language(tmp_path, fake_agent):
 
     assert 'BS_LANGUAGE_CODE=ru\n' in (directory / 'project.env').read_text(encoding='utf-8')
     prompt, _ = fake_agent[0]
-    assert 'The product is in Русский (`ru`) and English' in prompt
+    assert 'The product is in Русский (`ru`): `BS_LANGUAGES` and `BS_LANGUAGE_CODE`' in prompt
+    assert 'and English' not in prompt
     assert 'the language of the description' not in prompt
 
 
@@ -311,6 +315,68 @@ def test_new_with_a_name(tmp_path, fake_agent):
     args = ['new', str(tmp_path / 'x'), 'anything', '--name', 'catalog', '--no-venv']
     assert main.main(args) == 0
     assert (tmp_path / 'x' / 'catalog' / 'settings.py').is_file()
+
+
+def test_new_normalizes_the_name(tmp_path, fake_agent, environment):
+    directory = tmp_path / 'x'
+    args = ['new', str(directory), 'anything', '--name', 'Master-na-chas', '--no-venv']
+    assert main.main(args) == 0
+
+    assert (directory / 'master_na_chas' / 'settings.py').is_file()
+    assert environment == [(directory.resolve(), 'master_na_chas', sys.executable)]
+    assert 'master_na_chas.main:app' in fake_agent[0][0]
+
+
+def server_of(directory):
+    """
+    The server of the database that `.env` of the new project names.
+    """
+    values = dict(
+        line.split('=', 1) for line in (directory / '.env').read_text().splitlines() if '=' in line
+    )
+    return values['BS_DATABASES__DEFAULT__HOST'], values['BS_DATABASES__DEFAULT__PORT']
+
+
+def test_new_on_the_server_of_the_environment(tmp_path, fake_agent, monkeypatch):
+    """
+    `.env` names the server before the database is made, which reads it.
+    """
+    monkeypatch.setenv('BS_DATABASES__DEFAULT__PORT', '9')
+    directory = tmp_path / 'library'
+    named = []
+    monkeypatch.setattr(
+        scaffold, 'create_database',
+        lambda directory, name, python=sys.executable: named.append(server_of(directory)) or '',
+    )
+
+    assert main.main(['new', str(directory), 'A library', '--no-venv']) == 0
+    assert named == [('localhost', '9')]
+
+
+@pytest.mark.parametrize('environment_server', [None, ('127.0.0.1', '9')])
+def test_new_with_a_database(tmp_path, fake_agent, monkeypatch, environment_server):
+    if environment_server:
+        monkeypatch.setenv('BS_DATABASES__DEFAULT__HOST', environment_server[0])
+        monkeypatch.setenv('BS_DATABASES__DEFAULT__PORT', environment_server[1])
+    directory = tmp_path / 'library'
+
+    assert main.main(['new', str(directory), 'A library', '--no-venv', '--database', '127.0.0.1:9']) == 0
+    assert server_of(directory) == ('127.0.0.1', '9')
+
+
+def test_new_refuses_a_database(tmp_path, fake_agent, monkeypatch, capsys, environment):
+    directory = tmp_path / 'library'
+
+    assert main.main(['new', str(directory), 'A library', '--no-venv', '--database', 'nonsense']) == 1
+    assert 'is no server' in capsys.readouterr().err
+    assert not directory.exists()
+
+    # the server of the environment is that of the commands: another one is refused
+    monkeypatch.setenv('BS_DATABASES__DEFAULT__HOST', 'db.internal')
+    assert main.main(['new', str(directory), 'A library', '--no-venv', '--database', '127.0.0.1:9']) == 1
+    assert 'leave `database` out' in capsys.readouterr().err
+    assert not directory.exists()
+    assert fake_agent == [] and environment == []
 
 
 def test_add(tmp_path, fake_agent):
